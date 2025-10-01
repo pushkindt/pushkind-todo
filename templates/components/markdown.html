@@ -1,0 +1,40 @@
+<div class="row g-1">
+    <div class="col">
+        <textarea autofocus class="form-control" rows=10 id="message-input" required
+            placeholder="Содержание">{{message | default(value='') | safe}}</textarea>
+        <input type="hidden" id="message" name="message" required value="{{message | default(value='')}}">
+    </div>
+    <div class="col border rounded" id="message-rendered">
+    </div>
+</div>
+<div class="row mb-2">
+    <div class="col">
+        <small class="text-muted">
+            Сообщение в формате <a href="https://www.markdownguide.org/basic-syntax/">markdown</a>
+        </small>
+    </div>
+    <div class="col">
+        <small class="text-muted">Превью сообщения</small>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+
+    function UpdateRenderedMessage() {
+        const edit_message = document.getElementById('message-input');
+        const message_send = document.getElementById('message');
+        const render_message = document.getElementById('message-rendered');
+        const rendered_message = marked.parse(edit_message.value);
+        render_message.innerHTML = rendered_message;
+        message_send.value = rendered_message;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        UpdateRenderedMessage();
+
+        const edit_message = document.getElementById('message-input');
+        edit_message.addEventListener("input", function () {
+            UpdateRenderedMessage();
+        });
+    })
+</script>

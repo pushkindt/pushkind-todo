@@ -1,0 +1,26 @@
+
+{% if items.pages | length > 1 %}
+    <nav aria-label="pagination">
+        <ul class="pagination justify-content-center flex-wrap" id="pagination">
+            {% for page in items.pages %}
+                {% if page %}
+                    {% if page != items.page %}
+                        <li class="page-item">
+                        <a class="page-link" href="?page={{page}}{% if search_query %}&q={{search_query}}{% endif %}">
+                                {{ page }}
+                            </a>
+                        </li>
+                    {% else %}
+                        <li class="page-item active" aria-current="page">
+                            <span class="page-link">{{ page }}</span>
+                        </li>
+                    {% endif %}
+                {% else %}
+                    <li class="page-item">
+                        <span class="ellipsis">…</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+        </ul>
+    </nav>
+{% endif %}

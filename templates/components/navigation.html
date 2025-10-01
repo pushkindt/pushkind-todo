@@ -1,0 +1,56 @@
+<div class="container">
+    <nav class="navbar navbar-expand-sm bg-body-tertiary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                Шаблоны
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false"
+                aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {%if current_page == 'index'%}active{%endif%}" href="/">Шаблоны</a>
+                    </li>
+                </ul>
+                <form class="d-flex w-100" role="search" action="/">
+                    <div class="input-group me-2">
+                        <input required name="search" class="form-control" type="search" placeholder="Поиск"
+                            aria-label="Search" value='{{search | default(value="")}}'>
+                        <button class="btn btn-outline-secondary" type="submit"><i class="bi bi-search"></i></button>
+                    </div>
+                </form>
+            </div>
+            <div class="dropdown-center">
+                <button class="btn btn-link nav-link align-items-center text-muted dropdown-toggle" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-person-circle fs-4"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <h6 class="dropdown-header">{{current_user.email}}</h6>
+                    </li>
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
+                    <li>
+                        <a class="dropdown-item icon-link" href="{{home_url}}">
+                            <i class="bi bi-house mb-2"></i>
+                            Домой
+                        </a>
+                    </li>
+                    <li>
+                        <form method="POST" action="/logout">
+                            <button type="submit" class="dropdown-item icon-link">
+                                <i class="bi bi-box-arrow-right mb-2"></i>
+                                Выйти
+                            </button>
+                        </form>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+</div>

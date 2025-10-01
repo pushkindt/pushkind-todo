@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block styles %}
+<style>
+    .add-template-container {
+        display: flex;
+        align-items: center;
+        text-align: center;
+    }
+
+    .add-template-container>button:hover {
+        opacity: 0.5;
+    }
+
+    .add-template-container>button {
+        opacity: 1.0;
+    }
+
+    .add-template-container>button:active {
+        opacity: 1.0;
+    }
+
+    .add-template-container::before,
+    .add-template-container::after {
+        content: '';
+        flex: 1;
+        border-bottom: 1px solid #000;
+        margin: 0 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include 'components/navigation.html' %}
+
+<div class="container bg-white border rounded my-2">
+
+    <div class="row">
+        <div class="col text-center add-template-container">
+            <button class="btn btn-link" type="button" data-bs-toggle="modal" data-bs-target="#templateModal">
+                <i class="bi bi-plus-circle"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="row d-none d-sm-flex fw-bold">
+        <div class="col overflow-hidden">
+            Идентификатор
+        </div>
+        <div class="col overflow-hidden">
+            Значение
+        </div>
+    </div>
+    <div id="templateList">
+        {% for template in templates.items %}
+        <div class="row my-1 py-1 border-top template selectable" data-id="{{template.id}}">
+            <div class="col-sm">
+                <strong>{{ template.id }}</strong>
+            </div>
+            <div class="col-sm">
+                <span class="d-sm-none fw-bold">Значение:</span>
+                {{ template.value }}
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-warning my-2" role="alert">
+            Нет шаблонов для отображения.
+        </div>
+        {% endfor %}
+    </div>
+    {% set items = templates %}
+    {% include 'components/pagination.html' %}
+</div>
+
+{% include 'main/add_template_modal.html' %}
+
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+
+    });
+</script>
+
+{% endblock %}
