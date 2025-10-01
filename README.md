@@ -1,6 +1,6 @@
-# pushkind-template
+# pushkind-todo
 
-`pushkind-template` is a template repository for building Pushkind web services powered by Rust, Actix Web, Diesel, and Tera on top of Bootstrap 5.3 for the frontend.
+`pushkind-todo` is a Pushkind web service for creating, assigning, and tracking tasks, powered by Rust, Actix Web, Diesel, and Tera on top of Bootstrap 5.3 for the frontend.
 
 ## Features
 
