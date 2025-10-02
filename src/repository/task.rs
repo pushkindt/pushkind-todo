@@ -130,9 +130,23 @@ impl TaskReader for DieselRepository {
 
 impl TaskWriter for DieselRepository {
     fn create_task(&self, new_task: &DomainNewTask) -> RepositoryResult<DomainTask> {
-        use crate::schema::tasks;
+        use crate::schema::{tasks, users};
 
         let mut conn = self.conn()?;
+
+        if let Some(assignee_id) = new_task.assigned_to {
+            let assignee = users::table
+                .filter(users::id.eq(assignee_id))
+                .filter(users::hub_id.eq(new_task.hub_id))
+                .select(users::id)
+                .first::<i32>(&mut conn)
+                .optional()?;
+
+            if assignee.is_none() {
+                return Err(RepositoryError::NotFound);
+            }
+        }
+
         let db_new = DbNewTask::from(new_task);
 
         let created = diesel::insert_into(tasks::table)
@@ -149,9 +163,23 @@ impl TaskWriter for DieselRepository {
         hub_id: i32,
         updates: &DomainUpdateTask,
     ) -> RepositoryResult<DomainTask> {
-        use crate::schema::tasks;
+        use crate::schema::{tasks, users};
 
         let mut conn = self.conn()?;
+
+        if let Some(Some(assignee_id)) = updates.assigned_to {
+            let assignee = users::table
+                .filter(users::id.eq(assignee_id))
+                .filter(users::hub_id.eq(hub_id))
+                .select(users::id)
+                .first::<i32>(&mut conn)
+                .optional()?;
+
+            if assignee.is_none() {
+                return Err(RepositoryError::NotFound);
+            }
+        }
+
         let db_updates = DbUpdateTask::from(updates);
 
         let target = tasks::table
