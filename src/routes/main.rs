@@ -6,7 +6,7 @@ use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
 use tera::Tera;
 
-use crate::forms::main::{AddTemplateForm, UploadTemplatesForm};
+use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::DieselRepository;
 use crate::services::main::IndexQuery;
 use crate::services::{ServiceError, main as main_service};
@@ -28,7 +28,8 @@ pub async fn show_index(
                 "index",
                 &server_config.auth_service_url,
             );
-            context.insert("templates", &data.templates);
+            context.insert("tasks", &data.tasks);
+            context.insert("templates", &data.tasks); // temporary alias while templates migrate
             context.insert("search", &data.search);
             render_template(&tera, "main/index.html", &context)
         }
@@ -37,19 +38,19 @@ pub async fn show_index(
             redirect("/na")
         }
         Err(err) => {
-            log::error!("Failed to list templates: {err}");
+            log::error!("Failed to list tasks: {err}");
             HttpResponse::InternalServerError().finish()
         }
     }
 }
 
-#[post("/template/add")]
-pub async fn add_template(
+#[post("/task/add")]
+pub async fn add_task(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    web::Form(form): web::Form<AddTemplateForm>,
+    web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
-    match main_service::add_template(repo.get_ref(), &user, form) {
+    match main_service::add_task(repo.get_ref(), &user, form) {
         Ok(outcome) => {
             FlashMessage::success(outcome.message).send();
             redirect(&outcome.redirect_to)
@@ -63,20 +64,20 @@ pub async fn add_template(
             redirect("/")
         }
         Err(err) => {
-            log::error!("Failed to add a template: {err}");
-            FlashMessage::error("Ошибка при добавлении шаблона").send();
+            log::error!("Failed to add a task: {err}");
+            FlashMessage::error("Ошибка при добавлении задачи").send();
             redirect("/")
         }
     }
 }
 
-#[post("/templates/upload")]
-pub async fn templates_upload(
+#[post("/tasks/upload")]
+pub async fn tasks_upload(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    MultipartForm(mut form): MultipartForm<UploadTemplatesForm>,
+    MultipartForm(mut form): MultipartForm<UploadTasksForm>,
 ) -> impl Responder {
-    match main_service::upload_templates(repo.get_ref(), &user, &mut form) {
+    match main_service::upload_tasks(repo.get_ref(), &user, &mut form) {
         Ok(outcome) => {
             FlashMessage::success(outcome.message).send();
             redirect(&outcome.redirect_to)
@@ -90,8 +91,8 @@ pub async fn templates_upload(
             redirect("/")
         }
         Err(err) => {
-            log::error!("Failed to add templates: {err}");
-            FlashMessage::error("Ошибка при добавлении шаблонов").send();
+            log::error!("Failed to add tasks: {err}");
+            FlashMessage::error("Ошибка при добавлении задач").send();
             redirect("/")
         }
     }
