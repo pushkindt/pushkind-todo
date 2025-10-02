@@ -2,26 +2,26 @@
 
 {% block styles %}
 <style>
-    .add-template-container {
+    .add-task-container {
         display: flex;
         align-items: center;
         text-align: center;
     }
 
-    .add-template-container>button:hover {
+    .add-task-container>button:hover {
         opacity: 0.5;
     }
 
-    .add-template-container>button {
+    .add-task-container>button {
         opacity: 1.0;
     }
 
-    .add-template-container>button:active {
+    .add-task-container>button:active {
         opacity: 1.0;
     }
 
-    .add-template-container::before,
-    .add-template-container::after {
+    .add-task-container::before,
+    .add-task-container::after {
         content: '';
         flex: 1;
         border-bottom: 1px solid #000;
@@ -36,43 +36,50 @@
 <div class="container bg-white border rounded my-2">
 
     <div class="row">
-        <div class="col text-center add-template-container">
-            <button class="btn btn-link" type="button" data-bs-toggle="modal" data-bs-target="#templateModal">
+        <div class="col text-center add-task-container">
+            <button class="btn btn-link" type="button" data-bs-toggle="modal" data-bs-target="#taskModal">
                 <i class="bi bi-plus-circle"></i>
             </button>
         </div>
     </div>
 
     <div class="row d-none d-sm-flex fw-bold">
-        <div class="col overflow-hidden">
-            Идентификатор
-        </div>
-        <div class="col overflow-hidden">
-            Значение
-        </div>
+        <div class="col-sm-2 overflow-hidden">Идентификатор</div>
+        <div class="col-sm overflow-hidden">Название</div>
+        <div class="col-sm overflow-hidden">Описание</div>
+        <div class="col-sm-2 overflow-hidden">Статус</div>
     </div>
-    <div id="templateList">
-        {% for template in templates.items %}
-        <div class="row my-1 py-1 border-top template selectable" data-id="{{template.id}}">
-            <div class="col-sm">
-                <strong>{{ template.id }}</strong>
+    <div id="taskList">
+        {% for task in tasks.items %}
+        <div class="row my-1 py-1 border-top selectable" data-id="{{ task.id }}">
+            <div class="col-sm-2">
+                <strong>{{ task.id }}</strong>
             </div>
             <div class="col-sm">
-                <span class="d-sm-none fw-bold">Значение:</span>
-                {{ template.value }}
+                <span class="d-sm-none fw-bold">Название:</span>
+                {{ task.title }}
+            </div>
+            <div class="col-sm">
+                <span class="d-sm-none fw-bold">Описание:</span>
+                {{ task.description | default(value="—") }}
+            </div>
+            <div class="col-sm-2 text-uppercase">
+                <span class="d-sm-none fw-bold">Статус:</span>
+                {% set status = task.status %}
+                {% include 'components/task_status.html' %}
             </div>
         </div>
         {% else %}
         <div class="alert alert-warning my-2" role="alert">
-            Нет шаблонов для отображения.
+            Нет задач для отображения.
         </div>
         {% endfor %}
     </div>
-    {% set items = templates %}
+    {% set items = tasks %}
     {% include 'components/pagination.html' %}
 </div>
 
-{% include 'main/add_template_modal.html' %}
+{% include 'main/add_task_modal.html' %}
 
 {% endblock %}
 

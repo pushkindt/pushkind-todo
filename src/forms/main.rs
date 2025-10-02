@@ -7,83 +7,99 @@ use serde::Deserialize;
 use thiserror::Error;
 use validator::Validate;
 
-use crate::domain::template::NewTemplate;
+use crate::domain::task::NewTask;
 
 #[derive(Deserialize, Validate)]
-pub struct AddTemplateForm {
+pub struct AddTaskForm {
     #[validate(length(min = 1))]
     #[serde(deserialize_with = "empty_string_as_none")]
-    pub value: Option<String>,
+    pub title: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub description: Option<String>,
 }
 
-impl AddTemplateForm {
-    pub fn to_new_template(self, hub_id: i32) -> NewTemplate {
-        NewTemplate::new(self.value, hub_id)
+impl AddTaskForm {
+    /// Convert the validated form into a [`NewTask`] payload.
+    pub fn into_new_task(self, hub_id: i32) -> Option<NewTask> {
+        let title = self.title?;
+
+        let mut new_task = NewTask::new(hub_id, title);
+
+        if let Some(description) = self.description {
+            new_task = new_task.description(description);
+        }
+
+        Some(new_task)
     }
 }
 
 #[derive(MultipartForm)]
-/// Multipart form for uploading a CSV file with new templates.
-pub struct UploadTemplatesForm {
+/// Multipart form for uploading a CSV file with new tasks.
+pub struct UploadTasksForm {
     #[multipart(limit = "10MB")]
-    /// Uploaded CSV file containing template data.
+    /// Uploaded CSV file containing task data.
     pub csv: TempFile,
 }
 
 #[derive(Debug, Error)]
-/// Errors that can occur while parsing an uploaded templates CSV file.
-pub enum UploadTemplatesFormError {
+/// Errors that can occur while parsing an uploaded tasks CSV file.
+pub enum UploadTasksFormError {
     #[error("Error reading csv file")]
     FileReadError,
     #[error("Error parsing csv file")]
     CsvParseError,
 }
 
-impl From<std::io::Error> for UploadTemplatesFormError {
+impl From<std::io::Error> for UploadTasksFormError {
     fn from(_: std::io::Error) -> Self {
-        UploadTemplatesFormError::FileReadError
+        UploadTasksFormError::FileReadError
     }
 }
 
-impl From<csv::Error> for UploadTemplatesFormError {
+impl From<csv::Error> for UploadTasksFormError {
     fn from(_: csv::Error) -> Self {
-        UploadTemplatesFormError::CsvParseError
+        UploadTasksFormError::CsvParseError
     }
 }
 
-impl UploadTemplatesForm {
-    /// Parse the uploaded CSV file into a list of [`NewTemplate`] records.
-    pub fn parse(&mut self, hub_id: i32) -> Result<Vec<NewTemplate>, UploadTemplatesFormError> {
+impl UploadTasksForm {
+    /// Parse the uploaded CSV file into a list of [`NewTask`] records.
+    pub fn parse(&mut self, hub_id: i32) -> Result<Vec<NewTask>, UploadTasksFormError> {
         self.csv.file.rewind()?;
-        parse_templates(self.csv.file.by_ref(), hub_id)
+        parse_tasks(self.csv.file.by_ref(), hub_id)
     }
 }
 
 #[derive(Deserialize)]
-struct TemplateCsvRow {
+struct TaskCsvRow {
     #[serde(default, deserialize_with = "empty_string_as_none")]
-    value: Option<String>,
+    title: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    description: Option<String>,
 }
 
-fn parse_templates<R: Read>(
-    reader: R,
-    hub_id: i32,
-) -> Result<Vec<NewTemplate>, UploadTemplatesFormError> {
+fn parse_tasks<R: Read>(reader: R, hub_id: i32) -> Result<Vec<NewTask>, UploadTasksFormError> {
     let mut csv_reader = csv::ReaderBuilder::new()
         .trim(Trim::All)
         .from_reader(reader);
 
-    let mut templates = Vec::new();
+    let mut tasks = Vec::new();
 
-    for row in csv_reader.deserialize::<TemplateCsvRow>() {
+    for row in csv_reader.deserialize::<TaskCsvRow>() {
         let record = row?;
 
-        if let Some(value) = record.value {
-            templates.push(NewTemplate::new(Some(value), hub_id));
+        if let Some(title) = record.title {
+            let mut task = NewTask::new(hub_id, title);
+
+            if let Some(description) = record.description {
+                task = task.description(description);
+            }
+
+            tasks.push(task);
         }
     }
 
-    Ok(templates)
+    Ok(tasks)
 }
 
 #[cfg(test)]
@@ -92,37 +108,35 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn parse_templates_returns_records_with_values() {
-        let csv = "value\nhello\nworld\n";
-        let templates = parse_templates(Cursor::new(csv), 42).expect("should parse");
+    fn parse_tasks_returns_records_with_titles() {
+        let csv = "title,description\nhello,first\nworld,second\n";
+        let tasks = parse_tasks(Cursor::new(csv), 42).expect("should parse");
 
-        assert_eq!(templates.len(), 2);
-        assert_eq!(templates[0].hub_id, 42);
-        assert_eq!(templates[0].value.as_deref(), Some("hello"));
-        assert_eq!(templates[1].value.as_deref(), Some("world"));
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].hub_id, 42);
+        assert_eq!(tasks[0].title, "hello");
+        assert_eq!(tasks[0].description.as_deref(), Some("first"));
+        assert_eq!(tasks[1].title, "world");
     }
 
     #[test]
-    fn parse_templates_skips_empty_or_missing_values() {
-        let csv = "value\n\n  \nfoo\n";
-        let templates = parse_templates(Cursor::new(csv), 7).expect("should parse");
+    fn parse_tasks_skips_empty_or_missing_titles() {
+        let csv = "title\n\n  \nfoo\n";
+        let tasks = parse_tasks(Cursor::new(csv), 7).expect("should parse");
 
-        assert_eq!(templates.len(), 1);
-        assert_eq!(templates[0].hub_id, 7);
-        assert_eq!(templates[0].value.as_deref(), Some("foo"));
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].hub_id, 7);
+        assert_eq!(tasks[0].title, "foo");
     }
 
     #[test]
-    fn parse_templates_propagates_csv_errors() {
-        let csv = "value\nfoo,bar\n";
+    fn parse_tasks_propagates_csv_errors() {
+        let csv = "title\nfoo,bar\n";
 
-        match parse_templates(Cursor::new(csv), 1) {
-            Err(UploadTemplatesFormError::CsvParseError) => {}
+        match parse_tasks(Cursor::new(csv), 1) {
+            Err(UploadTasksFormError::CsvParseError) => {}
             Err(other) => panic!("expected csv parse error, got {:?}", other),
-            Ok(templates) => panic!(
-                "expected csv parse error but parsed {} rows",
-                templates.len()
-            ),
+            Ok(tasks) => panic!("expected csv parse error but parsed {} rows", tasks.len()),
         }
     }
 }

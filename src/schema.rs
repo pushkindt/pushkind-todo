@@ -26,16 +26,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    templates (id) {
-        id -> Integer,
-        hub_id -> Integer,
-        value -> Nullable<Text>,
-        created_at -> Timestamp,
-        updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
     users (id) {
         id -> Integer,
         hub_id -> Integer,
@@ -50,4 +40,4 @@ diesel::joinable!(task_assignments -> tasks (task_id));
 diesel::joinable!(task_assignments -> users (assignee_id));
 diesel::joinable!(tasks -> users (assigned_to));
 
-diesel::allow_tables_to_appear_in_same_query!(task_assignments, tasks, templates, users,);
+diesel::allow_tables_to_appear_in_same_query!(task_assignments, tasks, users,);

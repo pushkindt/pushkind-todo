@@ -1,0 +1,14 @@
+{% set status_key = status | default(value="pending") | lower %}
+{% if status_key == "pending" %}
+    В ожидании
+{% elif status_key == "inprogress" %}
+    В работе
+{% elif status_key == "blocked" %}
+    Заблокирована
+{% elif status_key == "completed" %}
+    Завершена
+{% elif status_key == "archived" %}
+    Архивирована
+{% else %}
+    {{ status_key }}
+{% endif %}

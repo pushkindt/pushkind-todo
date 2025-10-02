@@ -1,6 +1,6 @@
 -- Capture task lifecycle metadata and assignments.
 CREATE TABLE tasks (
-    id INTEGER PRIMARY KEY,
+    id INTEGER NOT NULL PRIMARY KEY,
     hub_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
@@ -24,7 +24,7 @@ CREATE TABLE tasks (
 
 -- Track assignment history for auditing purposes.
 CREATE TABLE task_assignments (
-    id INTEGER PRIMARY KEY,
+    id INTEGER NOT NULL PRIMARY KEY,
     task_id INTEGER NOT NULL,
     hub_id INTEGER NOT NULL,
     assignee_id INTEGER NOT NULL,

@@ -6,7 +6,7 @@ use crate::services::main::IndexQuery;
 use crate::services::{ServiceError, main as main_service};
 
 #[get("/v1/templates")]
-/// Return a JSON list of templates with optional search and pagination.
+/// Return a JSON list of tasks with optional search and pagination.
 ///
 /// Users without the role stored in `crate::SERVICE_ACCESS_ROLE` receive a `401 Unauthorized` response.
 pub async fn api_v1_templates(
@@ -15,10 +15,10 @@ pub async fn api_v1_templates(
     repo: web::Data<DieselRepository>,
 ) -> impl Responder {
     match main_service::load_index_page(repo.get_ref(), &user, params.0) {
-        Ok(response) => HttpResponse::Ok().json(response.templates),
+        Ok(response) => HttpResponse::Ok().json(response.tasks),
         Err(ServiceError::Unauthorized) => HttpResponse::Unauthorized().finish(),
         Err(err) => {
-            log::error!("Failed to list templates: {err}");
+            log::error!("Failed to list tasks: {err}");
             HttpResponse::InternalServerError().finish()
         }
     }

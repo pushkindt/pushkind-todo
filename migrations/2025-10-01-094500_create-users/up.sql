@@ -1,6 +1,6 @@
 -- Create table to store members managed by the service.
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
+    id INTEGER NOT NULL PRIMARY KEY,
     hub_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     email TEXT NOT NULL,
