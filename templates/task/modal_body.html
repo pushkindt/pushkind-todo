@@ -31,11 +31,11 @@
         <div class="col-md-10">
             {% set current_status = task.status | default(value='Pending') | lower %}
             <select class="form-select" id="modifyTaskStatus" name="status" required>
-                <option value="Pending">В ожидании</option>
-                <option value="InProgress">В работе</option>
-                <option value="Blocked">Заблокирована</option>
-                <option value="Completed">Завершена</option>
-                <option value="Archived">Архивирована</option>
+                <option value="Pending" {% if current_status == 'pending' %}selected{% endif %}>В ожидании</option>
+                <option value="InProgress" {% if current_status == 'inprogress' %}selected{% endif %}>В работе</option>
+                <option value="Blocked" {% if current_status == 'blocked' %}selected{% endif %}>Заблокирована</option>
+                <option value="Completed" {% if current_status == 'completed' %}selected{% endif %}>Завершена</option>
+                <option value="Archived" {% if current_status == 'archived' %}selected{% endif %}>Архивирована</option>
             </select>
         </div>
     </div>
