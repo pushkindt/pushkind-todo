@@ -11,6 +11,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    task_events (id) {
+        id -> Integer,
+        task_id -> Integer,
+        user_id -> Nullable<Integer>,
+        event_type -> Text,
+        event_data -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     tasks (id) {
         id -> Integer,
         hub_id -> Integer,
@@ -19,6 +30,7 @@ diesel::table! {
         status -> Text,
         due_date -> Nullable<Date>,
         assigned_to -> Nullable<Integer>,
+        author_id -> Integer,
         created_at -> Timestamp,
         updated_at -> Timestamp,
         completed_at -> Nullable<Timestamp>,
@@ -38,6 +50,7 @@ diesel::table! {
 
 diesel::joinable!(task_assignments -> tasks (task_id));
 diesel::joinable!(task_assignments -> users (assignee_id));
-diesel::joinable!(tasks -> users (assigned_to));
+diesel::joinable!(task_events -> tasks (task_id));
+diesel::joinable!(task_events -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(task_assignments, tasks, users,);
+diesel::allow_tables_to_appear_in_same_query!(task_assignments, task_events, tasks, users,);

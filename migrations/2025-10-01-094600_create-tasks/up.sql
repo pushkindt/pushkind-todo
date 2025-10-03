@@ -7,6 +7,7 @@ CREATE TABLE tasks (
     status TEXT NOT NULL DEFAULT 'Pending',
     due_date DATE,
     assigned_to INTEGER,
+    author_id INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
@@ -19,7 +20,10 @@ CREATE TABLE tasks (
     )),
     CONSTRAINT task_assignee_fk FOREIGN KEY (assigned_to)
         REFERENCES users (id)
-        ON DELETE SET NULL
+        ON DELETE SET NULL,
+    CONSTRAINT task_author_fk FOREIGN KEY (author_id)
+        REFERENCES users (id)
+        ON DELETE RESTRICT
 );
 
 -- Track assignment history for auditing purposes.
@@ -42,6 +46,9 @@ CREATE INDEX tasks_hub_idx
 
 CREATE INDEX tasks_assigned_to_idx
     ON tasks (assigned_to);
+
+CREATE INDEX tasks_author_id_idx
+    ON tasks (author_id);
 
 CREATE INDEX task_assignments_task_idx
     ON task_assignments (task_id);

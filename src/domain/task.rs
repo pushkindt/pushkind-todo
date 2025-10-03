@@ -46,6 +46,8 @@ pub struct Task {
     pub due_date: Option<NaiveDate>,
     /// Identifier of the user assigned to the task, if any.
     pub assigned_to: Option<i32>,
+    /// Identifier of the user who created the task.
+    pub author_id: i32,
     /// Timestamp for when the task was created.
     pub created_at: NaiveDateTime,
     /// Timestamp for the most recent update.
@@ -76,6 +78,8 @@ pub struct NewTask {
     pub due_date: Option<NaiveDate>,
     /// Optional identifier for the assignee.
     pub assigned_to: Option<i32>,
+    /// Identifier of the user who created the task.
+    pub author_id: i32,
     /// Creation timestamp captured at the moment of building the payload.
     pub created_at: NaiveDateTime,
     /// Update timestamp captured at the moment of building the payload.
@@ -84,7 +88,7 @@ pub struct NewTask {
 
 impl NewTask {
     /// Create a new task payload for the provided hub with the supplied title.
-    pub fn new(hub_id: i32, title: impl Into<String>) -> Self {
+    pub fn new(hub_id: i32, author_id: i32, title: impl Into<String>) -> Self {
         let now = chrono::Local::now().naive_utc();
         Self {
             hub_id,
@@ -93,6 +97,7 @@ impl NewTask {
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: None,
+            author_id,
             created_at: now,
             updated_at: now,
         }

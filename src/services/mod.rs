@@ -1,6 +1,7 @@
-pub mod main;
-
 pub use pushkind_common::services::errors::{ServiceError, ServiceResult};
+
+pub mod main;
+pub mod task;
 
 /// Successful service outcome that carries a flash message and redirect target.
 #[derive(Debug, Clone)]

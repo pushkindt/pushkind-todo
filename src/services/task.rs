@@ -1,0 +1,372 @@
+use std::collections::HashMap;
+
+use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::routes::check_role;
+use serde::Serialize;
+
+use crate::SERVICE_ACCESS_ROLE;
+use crate::domain::{task::Task, task_event::TaskEvent, user::User};
+use crate::repository::{TaskEventReader, TaskReader, UserReader};
+use crate::services::{ServiceError, ServiceResult};
+
+/// Task event accompanied by the optional author information.
+#[derive(Debug, Serialize)]
+pub struct TaskEventWithAuthor {
+    /// Persisted event data.
+    pub event: TaskEvent,
+    /// Author of the event, if present and accessible within the hub.
+    pub author: Option<User>,
+}
+
+/// Aggregated task information with the related event history.
+#[derive(Debug, Serialize)]
+pub struct TaskDetails {
+    /// Task metadata shown on the details page.
+    pub task: Task,
+    /// Author of the task.
+    pub author: User,
+    /// Task assignee when available in the current hub.
+    pub assignee: Option<User>,
+    /// Ordered list of events associated with the task.
+    pub events: Vec<TaskEventWithAuthor>,
+}
+
+/// Load a task and its events for the provided user, enriching with user data.
+pub fn load_task_details<R>(
+    repo: &R,
+    user: &AuthenticatedUser,
+    task_id: i32,
+) -> ServiceResult<TaskDetails>
+where
+    R: TaskReader + TaskEventReader + UserReader + ?Sized,
+{
+    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let task = repo
+        .get_task_by_id(task_id, user.hub_id)
+        .map_err(ServiceError::from)?
+        .ok_or(ServiceError::NotFound)?;
+
+    let author = repo
+        .get_user_by_id(task.author_id, user.hub_id)
+        .map_err(ServiceError::from)?
+        .ok_or_else(|| {
+            log::error!(
+                "Task {} references missing author {}",
+                task.id,
+                task.author_id
+            );
+            ServiceError::Internal
+        })?;
+
+    let assignee = match task.assigned_to {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, user.hub_id) {
+            Ok(user) => user,
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
+
+    let events = repo
+        .list_events_for_task(task.id, user.hub_id)
+        .map_err(ServiceError::from)?;
+
+    let mut author_cache: HashMap<i32, User> = HashMap::new();
+    for event in &events {
+        if let Some(author_id) = event.user_id {
+            if author_cache.contains_key(&author_id) {
+                continue;
+            }
+
+            match repo.get_user_by_id(author_id, user.hub_id) {
+                Ok(Some(user)) => {
+                    author_cache.insert(author_id, user);
+                }
+                Ok(None) => {}
+                Err(err) => return Err(ServiceError::from(err)),
+            }
+        }
+    }
+
+    let events = events
+        .into_iter()
+        .map(|event| {
+            let author = event.user_id.and_then(|id| author_cache.get(&id).cloned());
+
+            TaskEventWithAuthor { event, author }
+        })
+        .collect();
+
+    Ok(TaskDetails {
+        task,
+        author,
+        assignee,
+        events,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, NaiveDateTime};
+    use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
+    use serde_json::json;
+
+    use crate::domain::{
+        task::{TaskAssignment, TaskStatus},
+        task_event::TaskEventType,
+        user::User,
+    };
+    use crate::repository::{TaskListQuery, UserListQuery};
+
+    #[derive(Default)]
+    struct StubRepo {
+        task: Option<Task>,
+        events: Vec<TaskEvent>,
+        hub_id: i32,
+        fail_with_error: bool,
+        users: HashMap<i32, User>,
+    }
+
+    impl StubRepo {
+        fn with_data(task: Task, events: Vec<TaskEvent>, hub_id: i32, users: Vec<User>) -> Self {
+            let users = users
+                .into_iter()
+                .map(|user| (user.id, user))
+                .collect::<HashMap<_, _>>();
+
+            Self {
+                task: Some(task),
+                events,
+                hub_id,
+                fail_with_error: false,
+                users,
+            }
+        }
+
+        fn with_error() -> Self {
+            Self {
+                task: None,
+                events: Vec::new(),
+                hub_id: 1,
+                fail_with_error: true,
+                users: HashMap::new(),
+            }
+        }
+
+        fn repo_error<T>(&self) -> RepositoryResult<T> {
+            Err(RepositoryError::Unexpected("boom".to_string()))
+        }
+    }
+
+    impl TaskReader for StubRepo {
+        fn get_task_by_id(&self, _: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            if hub_id != self.hub_id {
+                return Ok(None);
+            }
+
+            Ok(self.task.clone())
+        }
+
+        fn list_tasks(&self, _: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok((0, Vec::new()))
+        }
+
+        fn list_assignments_for_task(
+            &self,
+            _: i32,
+            _: i32,
+        ) -> RepositoryResult<Vec<TaskAssignment>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(Vec::new())
+        }
+    }
+
+    impl TaskEventReader for StubRepo {
+        fn list_events_for_task(&self, _: i32, hub_id: i32) -> RepositoryResult<Vec<TaskEvent>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            if hub_id != self.hub_id {
+                return Ok(Vec::new());
+            }
+
+            Ok(self.events.clone())
+        }
+
+        fn get_event_by_id(&self, _: i32, _: i32) -> RepositoryResult<Option<TaskEvent>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(None)
+        }
+    }
+
+    impl UserReader for StubRepo {
+        fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(self
+                .users
+                .get(&id)
+                .cloned()
+                .filter(|user| user.hub_id == hub_id))
+        }
+
+        fn get_user_by_email(&self, _: &str, _: i32) -> RepositoryResult<Option<User>> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(None)
+        }
+
+        fn list_users(&self, _: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok((self.users.len(), self.users.values().cloned().collect()))
+        }
+    }
+
+    fn fixed_datetime() -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2024, 1, 1)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .unwrap_or_else(|| {
+                NaiveDate::from_ymd_opt(1970, 1, 1)
+                    .and_then(|d| d.and_hms_opt(0, 0, 0))
+                    .expect("valid fallback date")
+            })
+    }
+
+    fn sample_task(id: i32, hub_id: i32, assigned_to: Option<i32>, author_id: i32) -> Task {
+        Task {
+            id,
+            hub_id,
+            title: "Test Task".to_string(),
+            description: Some("Detail".to_string()),
+            status: TaskStatus::Pending,
+            due_date: None,
+            assigned_to,
+            author_id,
+            created_at: fixed_datetime(),
+            updated_at: fixed_datetime(),
+            completed_at: None,
+        }
+    }
+
+    fn sample_event(id: i32, task_id: i32, user_id: Option<i32>) -> TaskEvent {
+        TaskEvent {
+            id,
+            task_id,
+            user_id,
+            event_type: TaskEventType::Comment,
+            event_data: json!({"message": "hi"}),
+            created_at: fixed_datetime(),
+        }
+    }
+
+    fn sample_user(id: i32, hub_id: i32, name: &str, email: &str) -> User {
+        User {
+            id,
+            hub_id,
+            name: name.to_string(),
+            email: email.to_string(),
+        }
+    }
+
+    fn user_with_roles(roles: &[&str]) -> AuthenticatedUser {
+        AuthenticatedUser {
+            sub: "user-1".to_string(),
+            email: "user@example.com".to_string(),
+            hub_id: 1,
+            name: "Test User".to_string(),
+            roles: roles.iter().map(|role| (*role).to_string()).collect(),
+            exp: 0,
+        }
+    }
+
+    #[test]
+    fn load_task_details_returns_data() {
+        let assignee = sample_user(7, 1, "Assignee", "assignee@example.com");
+        let author = sample_user(11, 1, "Author", "author@example.com");
+
+        let task = sample_task(5, 1, Some(assignee.id), author.id);
+        let event = sample_event(13, task.id, Some(author.id));
+
+        let repo = StubRepo::with_data(
+            task.clone(),
+            vec![event.clone()],
+            1,
+            vec![assignee.clone(), author.clone()],
+        );
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = load_task_details(&repo, &user, task.id).expect("should load task");
+
+        assert_eq!(result.task.id, task.id);
+        assert_eq!(result.author.id, author.id);
+        assert_eq!(result.assignee.as_ref().map(|u| u.id), Some(assignee.id));
+        assert_eq!(result.events.len(), 1);
+        let event_with_author = &result.events[0];
+        assert_eq!(event_with_author.event.id, event.id);
+        assert_eq!(
+            event_with_author.author.as_ref().map(|u| u.id),
+            Some(author.id)
+        );
+    }
+
+    #[test]
+    fn load_task_details_requires_role() {
+        let repo = StubRepo::default();
+        let user = user_with_roles(&[]);
+
+        let result = load_task_details(&repo, &user, 5);
+
+        assert!(matches!(result, Err(ServiceError::Unauthorized)));
+    }
+
+    #[test]
+    fn load_task_details_returns_not_found_for_missing_task() {
+        let repo = StubRepo {
+            task: None,
+            events: Vec::new(),
+            hub_id: 1,
+            fail_with_error: false,
+            users: HashMap::new(),
+        };
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = load_task_details(&repo, &user, 99);
+
+        assert!(matches!(result, Err(ServiceError::NotFound)));
+    }
+
+    #[test]
+    fn load_task_details_propagates_repository_error() {
+        let repo = StubRepo::with_error();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = load_task_details(&repo, &user, 1);
+
+        assert!(matches!(result, Err(ServiceError::Repository(_))));
+    }
+}

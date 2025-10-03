@@ -5,9 +5,12 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::task::Task;
+use crate::domain::{
+    task::Task,
+    user::{NewUser, User},
+};
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
-use crate::repository::{TaskListQuery, TaskReader, TaskWriter};
+use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
 
 /// Query parameters accepted by the index page service.
@@ -67,7 +70,7 @@ pub fn add_task<R>(
     form: AddTaskForm,
 ) -> ServiceResult<RedirectSuccess>
 where
-    R: TaskWriter + ?Sized,
+    R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
@@ -78,7 +81,9 @@ where
         return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
     }
 
-    let new_task = match form.into_new_task(user.hub_id) {
+    let author = resolve_or_create_author(repo, user)?;
+
+    let new_task = match form.into_new_task(user.hub_id, author.id) {
         Some(task) => task,
         None => {
             log::error!("Validated task form missing title value");
@@ -104,13 +109,15 @@ pub fn upload_tasks<R>(
     form: &mut UploadTasksForm,
 ) -> ServiceResult<RedirectSuccess>
 where
-    R: TaskWriter + ?Sized,
+    R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
     }
 
-    let new_tasks = form.parse(user.hub_id).map_err(|err| {
+    let author = resolve_or_create_author(repo, user)?;
+
+    let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
         ServiceError::Form("Ошибка при парсинге задач".to_string())
     })?;
@@ -128,6 +135,22 @@ where
     })
 }
 
+fn resolve_or_create_author<R>(repo: &R, user: &AuthenticatedUser) -> ServiceResult<User>
+where
+    R: UserReader + UserWriter + ?Sized,
+{
+    match repo
+        .get_user_by_email(&user.email, user.hub_id)
+        .map_err(ServiceError::from)?
+    {
+        Some(existing) => Ok(existing),
+        None => {
+            let new_user = NewUser::new(user.hub_id, user.name.clone(), user.email.clone());
+            repo.create_user(&new_user).map_err(ServiceError::from)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,8 +161,13 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::SERVICE_ACCESS_ROLE;
-    use crate::domain::task::{Task, TaskStatus};
-    use crate::repository::mock::{MockTaskReader, MockTaskWriter};
+    use crate::domain::task::{
+        NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskStatus,
+        UpdateTask as DomainUpdateTask,
+    };
+    use crate::domain::user::User;
+    use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
+    use crate::repository::{TaskWriter, UserListQuery, UserReader, UserWriter};
 
     use std::io::Write;
 
@@ -159,6 +187,7 @@ mod tests {
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: None,
+            author_id: 1,
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
@@ -173,6 +202,125 @@ mod tests {
             name: "Tester".to_string(),
             roles: roles.iter().map(|role| (*role).to_string()).collect(),
             exp: 0,
+        }
+    }
+
+    fn sample_user_record(id: i32, hub_id: i32, email: &str, name: &str) -> User {
+        User {
+            id,
+            hub_id,
+            name: name.to_string(),
+            email: email.to_string(),
+        }
+    }
+
+    struct TaskWriterUserRepo {
+        pub task_writer: MockTaskWriter,
+        pub user_reader: MockUserReader,
+        pub user_writer: MockUserWriter,
+    }
+
+    impl TaskWriterUserRepo {
+        fn new() -> Self {
+            Self {
+                task_writer: MockTaskWriter::new(),
+                user_reader: MockUserReader::new(),
+                user_writer: MockUserWriter::new(),
+            }
+        }
+    }
+
+    impl TaskWriter for TaskWriterUserRepo {
+        fn create_task(
+            &self,
+            new_task: &DomainNewTask,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Task> {
+            self.task_writer.create_task(new_task)
+        }
+
+        fn update_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+            updates: &DomainUpdateTask,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Task> {
+            self.task_writer.update_task(task_id, hub_id, updates)
+        }
+
+        fn delete_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.task_writer.delete_task(task_id, hub_id)
+        }
+
+        fn record_assignment(
+            &self,
+            assignment: &DomainTaskAssignment,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.task_writer.record_assignment(assignment)
+        }
+
+        fn remove_assignment(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+            assignee_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.task_writer
+                .remove_assignment(task_id, hub_id, assignee_id)
+        }
+    }
+
+    impl UserReader for TaskWriterUserRepo {
+        fn get_user_by_id(
+            &self,
+            id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
+            self.user_reader.get_user_by_id(id, hub_id)
+        }
+
+        fn get_user_by_email(
+            &self,
+            email: &str,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
+            self.user_reader.get_user_by_email(email, hub_id)
+        }
+
+        fn list_users(
+            &self,
+            query: UserListQuery,
+        ) -> pushkind_common::repository::errors::RepositoryResult<(usize, Vec<User>)> {
+            self.user_reader.list_users(query)
+        }
+    }
+
+    impl UserWriter for TaskWriterUserRepo {
+        fn create_user(
+            &self,
+            new_user: &crate::domain::user::NewUser,
+        ) -> pushkind_common::repository::errors::RepositoryResult<User> {
+            self.user_writer.create_user(new_user)
+        }
+
+        fn update_user(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+            updates: &crate::domain::user::UpdateUser,
+        ) -> pushkind_common::repository::errors::RepositoryResult<User> {
+            self.user_writer.update_user(user_id, hub_id, updates)
+        }
+
+        fn delete_user(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.user_writer.delete_user(user_id, hub_id)
         }
     }
 
@@ -282,11 +430,11 @@ mod tests {
 
     #[test]
     fn add_task_returns_unauthorized_when_role_missing() {
-        let repo = MockTaskWriter::new();
+        let repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
-            description: None,
+            message: None,
         };
 
         let result = add_task(&repo, &user, form);
@@ -296,11 +444,11 @@ mod tests {
 
     #[test]
     fn add_task_returns_form_error_on_validation_failure() {
-        let repo = MockTaskWriter::new();
+        let repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some(String::new()),
-            description: None,
+            message: None,
         };
 
         let result = add_task(&repo, &user, form);
@@ -315,17 +463,32 @@ mod tests {
 
     #[test]
     fn add_task_persists_new_record_on_success() {
-        let mut repo = MockTaskWriter::new();
+        let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
-            description: None,
+            message: None,
         };
 
         let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let author = sample_user_record(7, expected_hub, &expected_email, &user.name);
+        let expected_author_id = author.id;
         let hub_for_return = expected_hub;
 
-        repo.expect_create_task()
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email);
+                assert_eq!(hub, expected_hub);
+                Ok(Some(author.clone()))
+            });
+
+        repo.user_writer.expect_create_user().never();
+
+        repo.task_writer
+            .expect_create_task()
             .times(1)
             .withf(move |task| {
                 assert_eq!(task.hub_id, expected_hub);
@@ -334,6 +497,7 @@ mod tests {
                 assert_eq!(task.status, TaskStatus::Pending);
                 assert!(task.due_date.is_none());
                 assert!(task.assigned_to.is_none());
+                assert_eq!(task.author_id, expected_author_id);
                 true
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
@@ -350,16 +514,94 @@ mod tests {
     }
 
     #[test]
-    fn add_task_propagates_repository_errors() {
-        let mut repo = MockTaskWriter::new();
+    fn add_task_creates_author_when_missing() {
+        let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
-            description: None,
+            message: None,
         };
 
-        repo.expect_create_task()
+        let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let expected_email_for_lookup = expected_email.clone();
+        let expected_email_lower = expected_email.to_lowercase();
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name = user.name.clone();
+        let expected_name_for_create = expected_name.clone();
+        let created_author =
+            sample_user_record(13, expected_hub, &expected_email_lower, &expected_name);
+        let author_id = created_author.id;
+        let hub_for_return = expected_hub;
+        let created_author_for_create = created_author.clone();
+
+        repo.user_reader
+            .expect_get_user_by_email()
             .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email_for_lookup);
+                assert_eq!(hub, expected_hub);
+                Ok(None)
+            });
+
+        repo.user_writer
+            .expect_create_user()
+            .times(1)
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(created_author_for_create.clone())
+            });
+
+        repo.task_writer
+            .expect_create_task()
+            .times(1)
+            .withf(move |task| {
+                assert_eq!(task.hub_id, expected_hub);
+                assert_eq!(task.author_id, author_id);
+                true
+            })
+            .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
+
+        let result = add_task(&repo, &user, form);
+
+        assert!(result.is_ok(), "expected task creation to succeed");
+    }
+
+    #[test]
+    fn add_task_propagates_repository_errors() {
+        let mut repo = TaskWriterUserRepo::new();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let form = AddTaskForm {
+            title: Some("alpha".to_string()),
+            message: None,
+        };
+
+        let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let author = sample_user_record(8, expected_hub, &expected_email, &user.name);
+        let expected_author_id = author.id;
+
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email);
+                assert_eq!(hub, expected_hub);
+                Ok(Some(author.clone()))
+            });
+
+        repo.user_writer.expect_create_user().never();
+
+        repo.task_writer
+            .expect_create_task()
+            .times(1)
+            .withf(move |task| {
+                assert_eq!(task.hub_id, expected_hub);
+                assert_eq!(task.author_id, expected_author_id);
+                true
+            })
             .returning(|_| Err(RepositoryError::Unexpected("db write failed".to_string())));
 
         let result = add_task(&repo, &user, form);
@@ -374,7 +616,7 @@ mod tests {
 
     #[test]
     fn upload_tasks_returns_unauthorized_when_role_missing() {
-        let repo = MockTaskWriter::new();
+        let repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[]);
         let mut form = upload_form(
             "title
@@ -389,7 +631,7 @@ alpha
 
     #[test]
     fn upload_tasks_returns_form_error_when_parse_fails() {
-        let mut repo = MockTaskWriter::new();
+        let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let mut form = upload_form(
             "title
@@ -397,7 +639,22 @@ foo,bar
 ",
         );
 
-        repo.expect_create_task().never();
+        let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let author = sample_user_record(9, expected_hub, &expected_email, &user.name);
+
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email);
+                assert_eq!(hub, expected_hub);
+                Ok(Some(author.clone()))
+            });
+
+        repo.user_writer.expect_create_user().never();
+
+        repo.task_writer.expect_create_task().never();
 
         let result = upload_tasks(&repo, &user, &mut form);
 
@@ -411,7 +668,7 @@ foo,bar
 
     #[test]
     fn upload_tasks_persists_uploaded_records() {
-        let mut repo = MockTaskWriter::new();
+        let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let mut form = upload_form(
             "title,description
@@ -421,26 +678,44 @@ beta,
         );
 
         let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let author = sample_user_record(10, expected_hub, &expected_email, &user.name);
+        let expected_author_id = author.id;
         let captured_titles = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let titles_for_closure = std::sync::Arc::clone(&captured_titles);
         let hub_for_return = expected_hub;
 
-        repo.expect_create_task().times(2).returning(move |task| {
-            assert_eq!(task.hub_id, hub_for_return);
-            assert!(task.description.is_none());
-            assert!(task.due_date.is_none());
-            assert!(task.assigned_to.is_none());
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email);
+                assert_eq!(hub, expected_hub);
+                Ok(Some(author.clone()))
+            });
 
-            let mut titles = match titles_for_closure.lock() {
-                Ok(guard) => guard,
-                Err(err) => panic!("failed to lock titles mutex: {err}"),
-            };
+        repo.user_writer.expect_create_user().never();
 
-            titles.push(task.title.clone());
-            let task_id = titles.len() as i32;
+        repo.task_writer
+            .expect_create_task()
+            .times(2)
+            .returning(move |task| {
+                assert_eq!(task.hub_id, hub_for_return);
+                assert!(task.description.is_none());
+                assert!(task.due_date.is_none());
+                assert!(task.assigned_to.is_none());
+                assert_eq!(task.author_id, expected_author_id);
 
-            Ok(sample_task(task_id, hub_for_return, &task.title))
-        });
+                let mut titles = match titles_for_closure.lock() {
+                    Ok(guard) => guard,
+                    Err(err) => panic!("failed to lock titles mutex: {err}"),
+                };
+
+                titles.push(task.title.clone());
+                let task_id = titles.len() as i32;
+
+                Ok(sample_task(task_id, hub_for_return, &task.title))
+            });
 
         let result = upload_tasks(&repo, &user, &mut form);
 
@@ -460,5 +735,64 @@ beta,
         assert_eq!(titles.len(), 2);
         assert!(titles.iter().any(|title| title == "alpha"));
         assert!(titles.iter().any(|title| title == "beta"));
+    }
+
+    #[test]
+    fn upload_tasks_creates_author_when_missing() {
+        let mut repo = TaskWriterUserRepo::new();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let mut form = upload_form(
+            "title,description
+alpha,
+",
+        );
+
+        let expected_hub = user.hub_id;
+        let expected_email = user.email.clone();
+        let expected_email_for_lookup = expected_email.clone();
+        let expected_email_lower = expected_email.to_lowercase();
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name = user.name.clone();
+        let expected_name_for_create = expected_name.clone();
+        let created_author =
+            sample_user_record(21, expected_hub, &expected_email_lower, &expected_name);
+        let author_id = created_author.id;
+        let hub_for_return = expected_hub;
+        let created_author_for_create = created_author.clone();
+
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub| {
+                assert_eq!(email, &expected_email_for_lookup);
+                assert_eq!(hub, expected_hub);
+                Ok(None)
+            });
+
+        repo.user_writer
+            .expect_create_user()
+            .times(1)
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(created_author_for_create.clone())
+            });
+
+        repo.task_writer
+            .expect_create_task()
+            .times(1)
+            .returning(move |task| {
+                assert_eq!(task.hub_id, hub_for_return);
+                assert_eq!(task.author_id, author_id);
+                Ok(sample_task(1, hub_for_return, &task.title))
+            });
+
+        let result = upload_tasks(&repo, &user, &mut form);
+
+        assert!(
+            result.is_ok(),
+            "expected upload to succeed when author is created"
+        );
     }
 }

@@ -33,6 +33,7 @@ pushkind-common = { git = "https://github.com/pushkindt/pushkind-common.git", br
     "actix",
 ] }
 validator = { version = "0.20.0", features = ["derive"] }
+ammonia = "4.1.2"
 
 [dev-dependencies]
 diesel_migrations = "2.2.0"

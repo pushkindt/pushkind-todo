@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'components/navigation.html' %}
+
+<div class="container my-3">
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2 class="h5 mb-0">{{ task.title }}</h2>
+            {% set status = task.status %}
+            {% include 'components/task_status.html' %}
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Идентификатор</dt>
+                        <dd class="col-sm-8">{{ task.id }}</dd>
+
+                        <dt class="col-sm-4">Описание</dt>
+                        <dd class="col-sm-8">
+                            {% include 'components/task_description.html' %}
+                        </dd>
+
+                        <dt class="col-sm-4">Срок</dt>
+                        <dd class="col-sm-8">
+                            {% if task.due_date %}
+                            {{ task.due_date }}
+                            {% else %}
+                            —
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+                <div class="col-md-6">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Создана</dt>
+                        <dd class="col-sm-8">{{ task.created_at | date }}</dd>
+
+                        <dt class="col-sm-4">Обновлена</dt>
+                        <dd class="col-sm-8">{{ task.updated_at | date }}</dd>
+
+                        <dt class="col-sm-4">Автор</dt>
+                        <dd class="col-sm-8">
+                            {% set user = author %}
+                            {% include 'components/user_popover.html' %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <h3 class="h6">Исполнитель</h3>
+                    {% if assignee %}
+                    <p class="mb-0"><strong>{{ assignee.name }}</strong></p>
+                    <p class="mb-0 text-muted">{{ assignee.email }}</p>
+                    {% else %}
+                    <p class="text-muted mb-0">Исполнитель не назначен.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="h6 mb-0">История событий</h3>
+        </div>
+        <div class="list-group list-group-flush">
+            {% for item in events %}
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <span class="badge text-bg-light text-uppercase">{{ item.event.event_type }}</span>
+                    </div>
+                    <small class="text-muted">{{ item.event.created_at | date }}</small>
+                </div>
+                <div class="mt-2">
+                    <strong>Автор события:</strong>
+                    {% if item.author %}
+                    {{ item.author.name }} (<a href="mailto:{{ item.author.email }}">{{ item.author.email }}</a>)
+                    {% else %}
+                    —
+                    {% endif %}
+                </div>
+                <pre class="mt-2 mb-0 bg-light p-2 rounded">
+                    <code>
+                        {{ item.event.event_data | json_encode(pretty=true) }}
+                    </code>
+                </pre>
+            </div>
+            {% else %}
+            <div class="list-group-item">
+                <p class="mb-0 text-muted">Для этой задачи пока нет событий.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}

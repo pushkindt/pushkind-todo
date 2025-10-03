@@ -15,18 +15,18 @@ pub struct AddTaskForm {
     #[serde(deserialize_with = "empty_string_as_none")]
     pub title: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
-    pub description: Option<String>,
+    pub message: Option<String>,
 }
 
 impl AddTaskForm {
     /// Convert the validated form into a [`NewTask`] payload.
-    pub fn into_new_task(self, hub_id: i32) -> Option<NewTask> {
+    pub fn into_new_task(self, hub_id: i32, author_id: i32) -> Option<NewTask> {
         let title = self.title?;
 
-        let mut new_task = NewTask::new(hub_id, title);
+        let mut new_task = NewTask::new(hub_id, author_id, title);
 
-        if let Some(description) = self.description {
-            new_task = new_task.description(description);
+        if let Some(description) = self.message {
+            new_task = new_task.description(ammonia::clean(&description));
         }
 
         Some(new_task)
@@ -64,9 +64,13 @@ impl From<csv::Error> for UploadTasksFormError {
 
 impl UploadTasksForm {
     /// Parse the uploaded CSV file into a list of [`NewTask`] records.
-    pub fn parse(&mut self, hub_id: i32) -> Result<Vec<NewTask>, UploadTasksFormError> {
+    pub fn parse(
+        &mut self,
+        hub_id: i32,
+        author_id: i32,
+    ) -> Result<Vec<NewTask>, UploadTasksFormError> {
         self.csv.file.rewind()?;
-        parse_tasks(self.csv.file.by_ref(), hub_id)
+        parse_tasks(self.csv.file.by_ref(), hub_id, author_id)
     }
 }
 
@@ -78,7 +82,11 @@ struct TaskCsvRow {
     description: Option<String>,
 }
 
-fn parse_tasks<R: Read>(reader: R, hub_id: i32) -> Result<Vec<NewTask>, UploadTasksFormError> {
+fn parse_tasks<R: Read>(
+    reader: R,
+    hub_id: i32,
+    author_id: i32,
+) -> Result<Vec<NewTask>, UploadTasksFormError> {
     let mut csv_reader = csv::ReaderBuilder::new()
         .trim(Trim::All)
         .from_reader(reader);
@@ -89,10 +97,10 @@ fn parse_tasks<R: Read>(reader: R, hub_id: i32) -> Result<Vec<NewTask>, UploadTa
         let record = row?;
 
         if let Some(title) = record.title {
-            let mut task = NewTask::new(hub_id, title);
+            let mut task = NewTask::new(hub_id, author_id, title);
 
             if let Some(description) = record.description {
-                task = task.description(description);
+                task = task.description(ammonia::clean(&description));
             }
 
             tasks.push(task);
@@ -110,7 +118,9 @@ mod tests {
     #[test]
     fn parse_tasks_returns_records_with_titles() {
         let csv = "title,description\nhello,first\nworld,second\n";
-        let tasks = parse_tasks(Cursor::new(csv), 42).expect("should parse");
+        let author_id = 5;
+        let tasks = parse_tasks(Cursor::new(csv), 42, author_id).expect("should parse");
+        assert!(tasks.iter().all(|task| task.author_id == author_id));
 
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].hub_id, 42);
@@ -122,7 +132,7 @@ mod tests {
     #[test]
     fn parse_tasks_skips_empty_or_missing_titles() {
         let csv = "title\n\n  \nfoo\n";
-        let tasks = parse_tasks(Cursor::new(csv), 7).expect("should parse");
+        let tasks = parse_tasks(Cursor::new(csv), 7, 9).expect("should parse");
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].hub_id, 7);
@@ -133,7 +143,7 @@ mod tests {
     fn parse_tasks_propagates_csv_errors() {
         let csv = "title\nfoo,bar\n";
 
-        match parse_tasks(Cursor::new(csv), 1) {
+        match parse_tasks(Cursor::new(csv), 1, 3) {
             Err(UploadTasksFormError::CsvParseError) => {}
             Err(other) => panic!("expected csv parse error, got {:?}", other),
             Ok(tasks) => panic!("expected csv parse error but parsed {} rows", tasks.len()),
