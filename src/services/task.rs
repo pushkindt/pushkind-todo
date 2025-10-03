@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::check_role;
 use serde::Serialize;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::{task::Task, task_event::TaskEvent, user::User};
-use crate::repository::{TaskEventReader, TaskReader, UserListQuery, UserReader};
-use crate::services::{ServiceError, ServiceResult};
+use crate::repository::{TaskEventReader, TaskReader, TaskWriter, UserListQuery, UserReader};
+use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
 
 /// Task event accompanied by the optional author information.
 #[derive(Debug, Serialize)]
@@ -164,6 +165,39 @@ where
     })
 }
 
+/// Remove the specified task after verifying permissions and existence.
+pub fn delete_task<R>(
+    repo: &R,
+    user: &AuthenticatedUser,
+    task_id: i32,
+) -> ServiceResult<RedirectSuccess>
+where
+    R: TaskReader + TaskWriter + ?Sized,
+{
+    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    if repo
+        .get_task_by_id(task_id, user.hub_id)
+        .map_err(ServiceError::from)?
+        .is_none()
+    {
+        return Err(ServiceError::NotFound);
+    }
+
+    repo.delete_task(task_id, user.hub_id)
+        .map_err(|err| match err {
+            RepositoryError::NotFound => ServiceError::NotFound,
+            other => ServiceError::from(other),
+        })?;
+
+    Ok(RedirectSuccess {
+        message: "Задача удалена.".to_string(),
+        redirect_to: "/".to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +206,12 @@ mod tests {
     use serde_json::json;
 
     use crate::domain::{
-        task::{TaskAssignment, TaskStatus},
+        task::{
+            NewTask as DomainNewTask,
+            TaskAssignment,
+            TaskStatus,
+            UpdateTask as DomainUpdateTask,
+        },
         task_event::TaskEventType,
         user::User,
     };
@@ -184,6 +223,7 @@ mod tests {
         events: Vec<TaskEvent>,
         hub_id: i32,
         fail_with_error: bool,
+        delete_returns_not_found: bool,
         users: HashMap<i32, User>,
     }
 
@@ -199,6 +239,7 @@ mod tests {
                 events,
                 hub_id,
                 fail_with_error: false,
+                delete_returns_not_found: false,
                 users,
             }
         }
@@ -209,6 +250,7 @@ mod tests {
                 events: Vec::new(),
                 hub_id: 1,
                 fail_with_error: true,
+                delete_returns_not_found: false,
                 users: HashMap::new(),
             }
         }
@@ -301,6 +343,57 @@ mod tests {
             }
 
             Ok((self.users.len(), self.users.values().cloned().collect()))
+        }
+    }
+
+    impl TaskWriter for StubRepo {
+        fn create_task(&self, _: &DomainNewTask) -> RepositoryResult<Task> {
+            self.repo_error()
+        }
+
+        fn update_task(
+            &self,
+            _: i32,
+            _: i32,
+            _: &DomainUpdateTask,
+        ) -> RepositoryResult<Task> {
+            self.repo_error()
+        }
+
+        fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            if self.delete_returns_not_found {
+                return Err(RepositoryError::NotFound);
+            }
+
+            match self.task {
+                Some(ref task) if task.id == task_id && task.hub_id == hub_id => Ok(()),
+                _ => Err(RepositoryError::NotFound),
+            }
+        }
+
+        fn record_assignment(&self, _: &TaskAssignment) -> RepositoryResult<()> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(())
+        }
+
+        fn remove_assignment(
+            &self,
+            _: i32,
+            _: i32,
+            _: i32,
+        ) -> RepositoryResult<()> {
+            if self.fail_with_error {
+                return self.repo_error();
+            }
+
+            Ok(())
         }
     }
 
@@ -408,6 +501,7 @@ mod tests {
             events: Vec::new(),
             hub_id: 1,
             fail_with_error: false,
+            delete_returns_not_found: false,
             users: HashMap::new(),
         };
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
@@ -423,6 +517,74 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = load_task_details(&repo, &user, 1);
+
+        assert!(matches!(result, Err(ServiceError::Repository(_))));
+    }
+
+    #[test]
+    fn delete_task_requires_role() {
+        let repo = StubRepo::with_data(
+            sample_task(1, 1, None, 2),
+            Vec::new(),
+            1,
+            Vec::new(),
+        );
+        let user = user_with_roles(&[]);
+
+        let result = delete_task(&repo, &user, 1);
+
+        assert!(matches!(result, Err(ServiceError::Unauthorized)));
+    }
+
+    #[test]
+    fn delete_task_returns_not_found_when_task_missing() {
+        let repo = StubRepo::default();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = delete_task(&repo, &user, 99);
+
+        assert!(matches!(result, Err(ServiceError::NotFound)));
+    }
+
+    #[test]
+    fn delete_task_returns_not_found_when_repository_reports_missing() {
+        let repo = StubRepo {
+            task: Some(sample_task(5, 1, None, 3)),
+            events: Vec::new(),
+            hub_id: 1,
+            fail_with_error: false,
+            delete_returns_not_found: true,
+            users: HashMap::new(),
+        };
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = delete_task(&repo, &user, 5);
+
+        assert!(matches!(result, Err(ServiceError::NotFound)));
+    }
+
+    #[test]
+    fn delete_task_returns_redirect_on_success() {
+        let repo = StubRepo::with_data(
+            sample_task(7, 1, None, 4),
+            Vec::new(),
+            1,
+            Vec::new(),
+        );
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let outcome = delete_task(&repo, &user, 7).expect("should delete task");
+
+        assert_eq!(outcome.message, "Задача удалена.");
+        assert_eq!(outcome.redirect_to, "/");
+    }
+
+    #[test]
+    fn delete_task_propagates_repository_error() {
+        let repo = StubRepo::with_error();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let result = delete_task(&repo, &user, 1);
 
         assert!(matches!(result, Err(ServiceError::Repository(_))));
     }
