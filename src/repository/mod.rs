@@ -4,10 +4,12 @@ use pushkind_common::repository::errors::RepositoryResult;
 
 use crate::domain::{
     task::{NewTask, Task, TaskAssignment, TaskListFilters, UpdateTask},
+    task_event::{NewTaskEvent, TaskEvent},
     user::{NewUser, UpdateUser, User},
 };
 
 pub mod task;
+pub mod task_event;
 pub mod user;
 
 #[cfg(test)]
@@ -142,4 +144,16 @@ pub trait TaskWriter {
         hub_id: i32,
         assignee_id: i32,
     ) -> RepositoryResult<()>;
+}
+
+/// Read-only operations over task event records.
+pub trait TaskEventReader {
+    fn list_events_for_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<Vec<TaskEvent>>;
+    fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>>;
+}
+
+/// Write operations over task event records.
+pub trait TaskEventWriter {
+    fn record_event(&self, event: &NewTaskEvent) -> RepositoryResult<TaskEvent>;
+    fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()>;
 }

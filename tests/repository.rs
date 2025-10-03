@@ -1,14 +1,17 @@
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate};
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_todo::domain::task::{
     NewTask as DomainNewTask, TaskAssignment as DomainTaskAssignment, TaskListFilters, TaskStatus,
     UpdateTask as DomainUpdateTask,
 };
+use pushkind_todo::domain::task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType};
 use pushkind_todo::domain::user::{NewUser as DomainNewUser, UpdateUser as DomainUpdateUser};
 use pushkind_todo::repository::DieselRepository;
 use pushkind_todo::repository::{
-    TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
+    TaskEventReader, TaskEventWriter, TaskListQuery, TaskReader, TaskWriter, UserListQuery,
+    UserReader, UserWriter,
 };
+use serde_json::json;
 
 mod common;
 
@@ -94,12 +97,106 @@ fn test_user_repository_crud() {
 }
 
 #[test]
+fn test_task_event_repository_crud() {
+    let test_db = common::TestDb::new("test_task_event_repository_crud.db");
+    let repo = DieselRepository::new(test_db.pool());
+
+    let author = repo
+        .create_user(&DomainNewUser::new(
+            1,
+            "Event Author".to_string(),
+            "author@example.com".to_string(),
+        ))
+        .expect("create author user");
+
+    let task = repo
+        .create_task(&DomainNewTask::new(1, author.id, "Eventful Task"))
+        .expect("create task for events");
+    assert_eq!(task.author_id, author.id);
+
+    let mut comment_event = DomainNewTaskEvent::new(
+        task.id,
+        Some(author.id),
+        TaskEventType::Comment,
+        json!({"text": "Initial comment"}),
+    );
+    comment_event.created_at -= Duration::seconds(5);
+
+    let comment = repo
+        .record_event(&comment_event)
+        .expect("record comment event");
+    assert_eq!(comment.task_id, task.id);
+
+    let fetched = repo
+        .get_event_by_id(comment.id, 1)
+        .expect("fetch event by id")
+        .expect("comment should exist");
+    assert_eq!(fetched.id, comment.id);
+
+    assert!(
+        repo.get_event_by_id(comment.id, 2)
+            .expect("cross hub fetch")
+            .is_none()
+    );
+
+    let mut status_event = DomainNewTaskEvent::new(
+        task.id,
+        None,
+        TaskEventType::StatusChanged,
+        json!({"from": "pending", "to": "in_progress"}),
+    );
+    status_event.created_at = comment_event.created_at + Duration::seconds(10);
+
+    let status = repo
+        .record_event(&status_event)
+        .expect("record status change");
+
+    let events = repo.list_events_for_task(task.id, 1).expect("list events");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].id, comment.id);
+    assert_eq!(events[1].id, status.id);
+
+    let cross_events = repo
+        .list_events_for_task(task.id, 2)
+        .expect("cross hub list");
+    assert!(cross_events.is_empty());
+
+    let err = repo
+        .delete_event(comment.id, 2)
+        .expect_err("cross hub delete");
+    assert!(matches!(err, RepositoryError::NotFound));
+
+    repo.delete_event(comment.id, 1)
+        .expect("delete comment event");
+
+    assert!(
+        repo.get_event_by_id(comment.id, 1)
+            .expect("fetch after delete")
+            .is_none()
+    );
+
+    let remaining = repo
+        .list_events_for_task(task.id, 1)
+        .expect("list remaining events");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, status.id);
+}
+
+#[test]
 fn test_task_repository_crud() {
     let test_db = common::TestDb::new("test_task_repository_crud.db");
     let repo = DieselRepository::new(test_db.pool());
 
     let due_alpha = NaiveDate::from_ymd_opt(2024, 1, 1).expect("valid date");
     let due_beta = NaiveDate::from_ymd_opt(2024, 2, 1).expect("valid date");
+
+    let author = repo
+        .create_user(&DomainNewUser::new(
+            1,
+            "Task Author".to_string(),
+            "author@example.com".to_string(),
+        ))
+        .expect("create author user");
 
     let assignee = repo
         .create_user(&DomainNewUser::new(
@@ -109,10 +206,10 @@ fn test_task_repository_crud() {
         ))
         .expect("create assignee user");
 
-    let alpha_new = DomainNewTask::new(1, "Alpha Task")
+    let alpha_new = DomainNewTask::new(1, author.id, "Alpha Task")
         .description("first task")
         .due_date(due_alpha);
-    let beta_new = DomainNewTask::new(1, "Beta Task")
+    let beta_new = DomainNewTask::new(1, author.id, "Beta Task")
         .description("second task")
         .status(TaskStatus::InProgress)
         .assign_to(assignee.id)
@@ -121,6 +218,8 @@ fn test_task_repository_crud() {
     let mut alpha = repo.create_task(&alpha_new).expect("create alpha task");
     let beta = repo.create_task(&beta_new).expect("create beta task");
 
+    assert_eq!(alpha.author_id, author.id);
+    assert_eq!(beta.author_id, author.id);
     assert_eq!(alpha.title, "Alpha Task");
     assert_eq!(beta.status, TaskStatus::InProgress);
     assert_eq!(beta.assigned_to, Some(assignee.id));

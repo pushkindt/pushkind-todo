@@ -134,6 +134,17 @@ impl TaskWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
+        let author_exists = users::table
+            .filter(users::id.eq(new_task.author_id))
+            .filter(users::hub_id.eq(new_task.hub_id))
+            .select(users::id)
+            .first::<i32>(&mut conn)
+            .optional()?;
+
+        if author_exists.is_none() {
+            return Err(RepositoryError::NotFound);
+        }
+
         if let Some(assignee_id) = new_task.assigned_to {
             let assignee = users::table
                 .filter(users::id.eq(assignee_id))

@@ -61,9 +61,9 @@
             </div>
             <div class="col-sm">
                 <span class="d-sm-none fw-bold">Описание:</span>
-                {{ task.description | default(value="—") }}
+                {% include 'components/task_description.html' %}
             </div>
-            <div class="col-sm-2 text-uppercase">
+            <div class="col-sm-2">
                 <span class="d-sm-none fw-bold">Статус:</span>
                 {% set status = task.status %}
                 {% include 'components/task_status.html' %}
@@ -87,7 +87,13 @@
 {% block scripts %}
 <script>
     document.addEventListener("DOMContentLoaded", () => {
-
+        var selectableList = document.querySelectorAll(".selectable");
+        selectableList.forEach((selectable) => {
+            selectable.addEventListener("click", () => {
+                const taskId = selectable.dataset.id;
+                document.location.href = `/task/${taskId}`;
+            });
+        });
     });
 </script>
 
