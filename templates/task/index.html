@@ -7,8 +7,15 @@
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h2 class="h5 mb-0">{{ task.title }}</h2>
-            {% set status = task.status %}
-            {% include 'components/task_status.html' %}
+            <div class="d-flex align-items-center gap-2">
+                {% set status = task.status %}
+                {% include 'components/task_status.html' %}
+                <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal"
+                    data-bs-target="#modifyTaskModal" hx-post="/task/modal/{{task.id}}" hx-swap="innerHTML"
+                    hx-target="#taskModalBody" title="Редактировать задачу">
+                    <i class="bi bi-pencil-square"></i>
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <div class="row mb-3">
@@ -99,4 +106,57 @@
     </div>
 </div>
 
+<div class="modal fade" id="modifyTaskModal" tabindex="-1" aria-labelledby="modifyTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="modifyTaskModalLabel">Изменить задачу</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div id="taskModalBody" class="modal-body">
+            </div>
+            <div class="modal-footer">
+                <form method="POST" action="/task/{{ task.id }}/delete">
+                    <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить?')">Удалить</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"
+    integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous">
+    </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.13.3/js/standalone/selectize.min.js"
+    integrity="sha512-pF+DNRwavWMukUv/LyzDyDMn8U2uvqYQdJN0Zvilr6DDo/56xPDZdDoyPDYZRSL4aOKO/FGKXTpzDyQJ8je8Qw=="
+    crossorigin="anonymous" referrerpolicy="no-referrer">
+    </script>
+<script>
+
+    document.addEventListener("DOMContentLoaded", () => {
+
+        document.addEventListener("htmx:afterSettle", function (evt) {
+            UpdateRenderedMessage();
+
+            const dueDateInput = document.getElementById("modifyTaskDueDate");
+            const clearDueDateButton = document.getElementById("clearModifyTaskDueDate");
+            if (dueDateInput && clearDueDateButton) {
+                clearDueDateButton.addEventListener("click", () => {
+                    dueDateInput.value = "";
+                });
+            }
+
+            const assigneeInput = document.getElementById("modifyTaskAssignee");
+            const clearAssigneeButton = document.getElementById("clearModifyTaskAssignee");
+            if (assigneeInput && clearAssigneeButton) {
+                clearAssigneeButton.addEventListener("click", () => {
+                    assigneeInput.value = "";
+                });
+            }
+        });
+    });
+</script>
 {% endblock %}
