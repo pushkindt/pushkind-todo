@@ -1,0 +1,69 @@
+<form action="/task/{{ task.id }}/update" method="POST">
+    <input type="hidden" name="task_id" value="{{ task.id }}">
+
+    <div class="row mb-3">
+        <label for="modifyTaskTitle" class="col-md-2 col-form-label">Название</label>
+        <div class="col-md-10">
+            <input type="text" class="form-control" id="modifyTaskTitle" name="title" value="{{ task.title }}"
+                placeholder="Название задачи" required>
+        </div>
+    </div>
+
+    {% set message = task.description%}
+    {% include 'components/markdown.html' %}
+
+    <div class="row mb-3">
+        <label for="modifyTaskDueDate" class="col-md-2 col-form-label">Срок</label>
+        <div class="col-md-10">
+            <div class="input-group">
+                <input type="date" class="form-control" id="modifyTaskDueDate" name="due_date"
+                    value="{{ task.due_date | default(value='') }}">
+                <button type="button" class="btn btn-outline-secondary" id="clearModifyTaskDueDate">
+                    Очистить
+                </button>
+            </div>
+            <div class="form-text">Оставьте поле пустым, чтобы не задавать срок.</div>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <label for="modifyTaskStatus" class="col-md-2 col-form-label">Статус</label>
+        <div class="col-md-10">
+            {% set current_status = task.status | default(value='Pending') | lower %}
+            <select class="form-select" id="modifyTaskStatus" name="status" required>
+                <option value="Pending">В ожидании</option>
+                <option value="InProgress">В работе</option>
+                <option value="Blocked">Заблокирована</option>
+                <option value="Completed">Завершена</option>
+                <option value="Archived">Архивирована</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <label for="modifyTaskAssignee" class="col-md-2 col-form-label">Исполнитель</label>
+        <div class="col-md-10">
+            <div class="input-group">
+                <input type="number" class="form-control" id="modifyTaskAssignee" name="assigned_to"
+                    value="{% if assignee %}{{ assignee.id }}{% endif %}" min="1"
+                    placeholder="Идентификатор пользователя">
+                <button type="button" class="btn btn-outline-secondary" id="clearModifyTaskAssignee">
+                    Снять назначение
+                </button>
+            </div>
+            <div class="form-text">
+                {% if assignee %}
+                Текущий исполнитель: {{ assignee.name }} ({{ assignee.email }}). Очистите поле, чтобы снять
+                назначение.
+                {% else %}
+                Укажите идентификатор пользователя, чтобы назначить задачу, или оставьте пустым.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="row mb-3">
+        <div class="col">
+            <button class="btn btn-primary" type="submit">Сохранить</button>
+        </div>
+    </div>
+</form>

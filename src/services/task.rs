@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::{task::Task, task_event::TaskEvent, user::User};
-use crate::repository::{TaskEventReader, TaskReader, UserReader};
+use crate::repository::{TaskEventReader, TaskReader, UserListQuery, UserReader};
 use crate::services::{ServiceError, ServiceResult};
 
 /// Task event accompanied by the optional author information.
@@ -104,6 +104,63 @@ where
         author,
         assignee,
         events,
+    })
+}
+
+/// Data needed to render the task modal for editing.
+#[derive(Debug, Serialize)]
+pub struct TaskModalData {
+    /// Task being edited in the modal.
+    pub task: Task,
+    /// Optional assignee for the task when available in the current hub.
+    pub assignee: Option<User>,
+    /// Users that can be selected as potential assignees.
+    pub users: Vec<User>,
+}
+
+/// Load the task along with supporting data required by the modal view.
+pub fn load_task_modal<R>(
+    repo: &R,
+    user: &AuthenticatedUser,
+    task_id: i32,
+) -> ServiceResult<TaskModalData>
+where
+    R: TaskReader + UserReader + ?Sized,
+{
+    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let task = repo
+        .get_task_by_id(task_id, user.hub_id)
+        .map_err(ServiceError::from)?
+        .ok_or(ServiceError::NotFound)?;
+
+    let assignee = match task.assigned_to {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, user.hub_id) {
+            Ok(Some(user)) => Some(user),
+            Ok(None) => {
+                log::warn!(
+                    "Task {} references missing assignee {} in hub {}",
+                    task.id,
+                    assignee_id,
+                    user.hub_id
+                );
+                None
+            }
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
+
+    let (_total, users) = repo
+        .list_users(UserListQuery::new(user.hub_id))
+        .map_err(ServiceError::from)?;
+
+    Ok(TaskModalData {
+        task,
+        assignee,
+        users,
     })
 }
 

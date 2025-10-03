@@ -15,7 +15,7 @@ use tera::Tera;
 
 use pushkind_todo::repository::DieselRepository;
 use pushkind_todo::routes::main::{add_task, show_index, tasks_upload};
-use pushkind_todo::routes::task::show_task;
+use pushkind_todo::routes::task::{show_task, task_modal};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -90,6 +90,7 @@ async fn main() -> std::io::Result<()> {
                     .service(add_task)
                     .service(tasks_upload)
                     .service(show_task)
+                    .service(task_modal)
                     .service(logout),
             )
             .app_data(web::Data::new(tera.clone()))
