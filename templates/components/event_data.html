@@ -43,7 +43,7 @@
         {% set previous = change['from'] | default(value=none) %}
         {% set current = change['to'] | default(value=none) %}
         <div>
-            <div class="fw-semibold">{{ metadata_label(key=key) }}</div>
+            <div class="fw-semibold">{{ macros::metadata_label(key=key) }}</div>
             <div class="text-muted small">Было</div>
             <div class="mb-1">
                 {{ macros::metadata_value(key=key, value=previous) }}
