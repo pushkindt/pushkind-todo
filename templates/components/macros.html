@@ -32,7 +32,7 @@
 {% else %}
 {{ key | replace(from="_", to=" ") | capitalize }}
 {% endif %}
-{% endmacro %}
+{% endmacro metadata_label %}
 
 {% macro metadata_value(key, value) %}
 {% if value is null or value == "" %}
@@ -42,4 +42,4 @@
 {% else %}
 {{ value }}
 {% endif %}
-{% endmacro metadata_label %}
+{% endmacro metadata_value %}
