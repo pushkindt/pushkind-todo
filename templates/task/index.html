@@ -177,7 +177,9 @@
         });
 
         document.addEventListener("htmx:afterSettle", function (evt) {
-            UpdateRenderedMessage();
+            if (typeof setupMarkdownEditor === "function") {
+                setupMarkdownEditor(evt.detail?.target ?? document);
+            }
 
             const dueDateInput = document.getElementById("modifyTaskDueDate");
             const clearDueDateButton = document.getElementById("clearModifyTaskDueDate");
