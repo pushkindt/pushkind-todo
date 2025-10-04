@@ -1,0 +1,45 @@
+{% macro status_badge(value) %}
+{% if value %}
+{% set status = value %}
+{% include 'components/task_status.html' %}
+{% else %}
+<span class="text-muted">—</span>
+{% endif %}
+{% endmacro status_badge %}
+
+{% macro assignment_user(user) %}
+{% if user %}
+<div>
+    <span class="fw-semibold">{{ user.name | default(value="Без имени") }}</span>
+    {% if user.email %}
+    <span class="text-muted ms-1">{{ user.email }}</span>
+    {% endif %}
+</div>
+{% else %}
+<span class="text-muted">Исполнитель не назначен</span>
+{% endif %}
+{% endmacro assignment_user %}
+
+{% macro metadata_label(key) %}
+{% if key == 'title' %}
+Название
+{% elif key == 'description' %}
+Описание
+{% elif key == 'due_date' %}
+Срок
+{% elif key == 'completed_at' %}
+Завершение
+{% else %}
+{{ key | replace(from="_", to=" ") | capitalize }}
+{% endif %}
+{% endmacro metadata_label %}
+
+{% macro metadata_value(key, value) %}
+{% if value is null or value == "" %}
+<span class="text-muted">—</span>
+{% elif key == 'description' %}
+<div class="small">{{ value | safe }}</div>
+{% else %}
+{{ value }}
+{% endif %}
+{% endmacro metadata_value %}

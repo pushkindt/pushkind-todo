@@ -1,5 +1,4 @@
 <form action="/task/{{ task.id }}/update" method="POST">
-    <input type="hidden" name="task_id" value="{{ task.id }}">
 
     <div class="row mb-3">
         <label for="modifyTaskTitle" class="col-md-2 col-form-label">Название</label>
@@ -31,25 +30,27 @@
         <div class="col-md-10">
             {% set current_status = task.status | default(value='Pending') | lower %}
             <select class="form-select" id="modifyTaskStatus" name="status" required>
-                <option value="Pending" {% if current_status == 'pending' %}selected{% endif %}>В ожидании</option>
-                <option value="InProgress" {% if current_status == 'inprogress' %}selected{% endif %}>В работе</option>
-                <option value="Blocked" {% if current_status == 'blocked' %}selected{% endif %}>Заблокирована</option>
-                <option value="Completed" {% if current_status == 'completed' %}selected{% endif %}>Завершена</option>
-                <option value="Archived" {% if current_status == 'archived' %}selected{% endif %}>Архивирована</option>
+                <option value="Pending" {% if current_status=='pending' %}selected{% endif %}>В ожидании</option>
+                <option value="InProgress" {% if current_status=='inprogress' %}selected{% endif %}>В работе</option>
+                <option value="Blocked" {% if current_status=='blocked' %}selected{% endif %}>Заблокирована</option>
+                <option value="Completed" {% if current_status=='completed' %}selected{% endif %}>Завершена</option>
+                <option value="Archived" {% if current_status=='archived' %}selected{% endif %}>Архивирована</option>
             </select>
         </div>
     </div>
 
     <div class="row mb-3">
-        <label for="modifyTaskAssignee" class="col-md-2 col-form-label">Исполнитель</label>
+        <label for="user-add-form-id" class="col-md-2 col-form-label">Исполнитель</label>
         <div class="col-md-10">
             <div class="input-group">
-                <input type="number" class="form-control" id="modifyTaskAssignee" name="assigned_to"
-                    value="{% if assignee %}{{ assignee.id }}{% endif %}" min="1"
-                    placeholder="Идентификатор пользователя">
-                <button type="button" class="btn btn-outline-secondary" id="clearModifyTaskAssignee">
-                    Снять назначение
-                </button>
+                <input type="hidden" id="user-name" name="name" required>
+                <input type="hidden" id="user-email" name="email" required>
+                <select class="form-control my-1" id="user-add-form-id" name="id" placeholder="Поиск исполнителя">
+                    <option></option>
+                    {% if assignee %}
+                    <option value="{{ assignee.email }}" selected>{{ assignee.name }}</option>
+                    {% endif %}
+                </select>
             </div>
             <div class="form-text">
                 {% if assignee %}

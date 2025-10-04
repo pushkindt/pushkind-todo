@@ -20,21 +20,37 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 
-    function UpdateRenderedMessage() {
-        const edit_message = document.getElementById('message-input');
-        const message_send = document.getElementById('message');
-        const render_message = document.getElementById('message-rendered');
-        const rendered_message = marked.parse(edit_message.value);
-        render_message.innerHTML = rendered_message;
-        message_send.value = rendered_message;
+    function setupMarkdownEditor(root = document) {
+        const editMessage = root.querySelector('#message-input');
+        if (!editMessage || editMessage.dataset.markdownInitialized === 'true') {
+            return;
+        }
+
+        const messageSend = root.querySelector('#message');
+        const renderMessage = root.querySelector('#message-rendered');
+        if (!messageSend || !renderMessage) {
+            return;
+        }
+
+        const updateRenderedMessage = () => {
+            const renderedMessage = marked.parse(editMessage.value);
+            renderMessage.innerHTML = renderedMessage;
+            messageSend.value = renderedMessage;
+        };
+
+        editMessage.addEventListener('input', updateRenderedMessage);
+        editMessage.dataset.markdownInitialized = 'true';
+
+        updateRenderedMessage();
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-        UpdateRenderedMessage();
+    setupMarkdownEditor();
 
-        const edit_message = document.getElementById('message-input');
-        edit_message.addEventListener("input", function () {
-            UpdateRenderedMessage();
-        });
-    })
+    document.addEventListener('htmx:afterSwap', (event) => {
+        setupMarkdownEditor(event.detail?.target ?? document);
+    });
+
+    document.addEventListener('htmx:afterSettle', (event) => {
+        setupMarkdownEditor(event.detail?.target ?? document);
+    });
 </script>

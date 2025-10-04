@@ -1,4 +1,12 @@
+{% import "components/macros.html" as macros %}
 {% extends 'base.html' %}
+
+{% block styles %}
+<link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.13.3/css/selectize.bootstrap4.min.css"
+    integrity="sha512-MMojOrCQrqLg4Iarid2YMYyZ7pzjPeXKRvhW9nZqLo6kPBBTuvNET9DBVWptAo/Q20Fy11EIHM5ig4WlIrJfQw=="
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+{% endblock %}
 
 {% block content %}
 {% include 'components/navigation.html' %}
@@ -70,6 +78,24 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header">
+            <h3 class="h6 mb-0">Добавить комментарий</h3>
+        </div>
+        <div class="card-body">
+            <form action="/task/{{ task.id }}/comments" method="POST" class="vstack gap-3">
+                <div>
+                    <label for="task-comment" class="form-label">Комментарий</label>
+                    <textarea class="form-control" id="task-comment" name="text" rows="4" required
+                        placeholder="Напишите комментарий к задаче"></textarea>
+                </div>
+                <div class="d-flex justify-content-end gap-2">
+                    <button type="submit" class="btn btn-primary">Отправить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-header">
             <h3 class="h6 mb-0">История событий</h3>
@@ -79,23 +105,23 @@
             <div class="list-group-item">
                 <div class="d-flex justify-content-between">
                     <div>
-                        <span class="badge text-bg-light text-uppercase">{{ item.event.event_type }}</span>
+                        {% set event_type = item.event.event_type %}
+                        {% include 'components/event_type.html' %}
                     </div>
                     <small class="text-muted">{{ item.event.created_at | date }}</small>
                 </div>
                 <div class="mt-2">
                     <strong>Автор события:</strong>
                     {% if item.author %}
-                    {{ item.author.name }} (<a href="mailto:{{ item.author.email }}">{{ item.author.email }}</a>)
+                    {% set user = item.author %}
+                    {% include 'components/user_popover.html' %}
                     {% else %}
                     —
                     {% endif %}
                 </div>
-                <pre class="mt-2 mb-0 bg-light p-2 rounded">
-                    <code>
-                        {{ item.event.event_data | json_encode(pretty=true) }}
-                    </code>
-                </pre>
+
+
+                {% include 'components/event_data.html' %}
             </div>
             {% else %}
             <div class="list-group-item">
@@ -127,6 +153,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"
     integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous">
     </script>
@@ -138,8 +165,21 @@
 
     document.addEventListener("DOMContentLoaded", () => {
 
+        let user_select = null;
+
+        document.addEventListener("htmx:beforeSwap", function (evt) {
+            if (user_select) {
+                let selectize_instance = user_select[0].selectize;
+                selectize_instance.destroy();
+                user_select.remove();
+                user_select = null;
+            }
+        });
+
         document.addEventListener("htmx:afterSettle", function (evt) {
-            UpdateRenderedMessage();
+            if (typeof setupMarkdownEditor === "function") {
+                setupMarkdownEditor(evt.detail?.target ?? document);
+            }
 
             const dueDateInput = document.getElementById("modifyTaskDueDate");
             const clearDueDateButton = document.getElementById("clearModifyTaskDueDate");
@@ -149,13 +189,48 @@
                 });
             }
 
-            const assigneeInput = document.getElementById("modifyTaskAssignee");
-            const clearAssigneeButton = document.getElementById("clearModifyTaskAssignee");
-            if (assigneeInput && clearAssigneeButton) {
-                clearAssigneeButton.addEventListener("click", () => {
-                    assigneeInput.value = "";
-                });
-            }
+            let user_select = $("#user-add-form-id");
+            user_select.selectize({
+                valueField: "sub",
+                labelField: "name",
+                searchField: ["name", "email"],
+                render: {
+                    option: function (item, escape) {
+                        let result = `<div class="border-bottom"><strong>${escape(item.name)} (${escape(item.email)})</strong>`;
+                        result += '</div>';
+                        return result
+                    }
+                },
+                options: [],
+                load: function (query, callback) {
+                    if (!query.length) return callback();
+                    $.ajax({
+                        url: '{{home_url|safe}}/api/v1/users?page=1&role=todo&query=' + encodeURIComponent(query),
+                        type: 'GET',
+                        error: function () {
+                            callback();
+                        },
+                        success: function (res) {
+                            callback(res.slice(0, 20));
+                        },
+                        xhrFields: {
+                            withCredentials: true
+                        },
+                    });
+                },
+            });
+            let selectize_instance = user_select[0].selectize;
+
+            selectize_instance.on("change", function (value) {
+                const selected = selectize_instance.options[value];
+                if (selected) {
+                    $("#user-name").val(selected.name);
+                    $("#user-email").val(selected.email);
+                } else {
+                    $("#user-name").val('');
+                    $("#user-email").val('');
+                }
+            });
         });
     });
 </script>
