@@ -1,0 +1,63 @@
+{% set event = item.event %}
+{% set type_value = event.event_type | default(value="") %}
+{% set type_key = type_value | lower %}
+
+
+<div class="mt-2 mb-0 bg-light p-2 rounded">
+    {% if type_key == "comment" %}
+    {% set text = event.event_data['text'] | default(value="") %}
+    {% if text %}
+    <p class="mb-0">{{ text }}</p>
+    {% else %}
+    <span class="text-muted">Комментарий без текста.</span>
+    {% endif %}
+    {% elif type_key == "statuschanged" %}
+    {% set previous = event.event_data['from'] | default(value="") %}
+    {% set current = event.event_data['to'] | default(value="") %}
+    <div class="d-flex flex-column gap-1">
+        <div>
+            <span class="text-muted me-2">Было:</span>
+            {{ macros::status_badge(value=previous) }}
+        </div>
+        <div>
+            <span class="text-muted me-2">Стало:</span>
+            {{ macros::status_badge(value=current) }}
+        </div>
+    </div>
+    {% elif type_key == "assignmentchanged" %}
+    {% set previous = event.event_data['from'] | default(value=none) %}
+    {% set current = event.event_data['to'] | default(value=none) %}
+    <div class="d-flex flex-column gap-2">
+        <div>
+            <div class="text-muted small">Было</div>
+            {{ macros::assignment_user(value=previous) }}
+        </div>
+        <div>
+            <div class="text-muted small">Стало</div>
+            {{ macros::assignment_user(value=current) }}
+        </div>
+    </div>
+    {% elif type_key == "metadataupdated" %}
+    <div class="vstack gap-2">
+        {% for key, change in event.event_data %}
+        {% set previous = change['from'] | default(value=none) %}
+        {% set current = change['to'] | default(value=none) %}
+        <div>
+            <div class="fw-semibold">{{ metadata_label(key=key) }}</div>
+            <div class="text-muted small">Было</div>
+            <div class="mb-1">
+                {{ macros::metadata_value(key=key, value=previous) }}
+            </div>
+            <div class="text-muted small">Стало</div>
+            <div>
+                {{ macros::metadata_value(key=key, value=current) }}
+            </div>
+        </div>
+        {% else %}
+        <span class="text-muted">Изменения не найдены.</span>
+        {% endfor %}
+    </div>
+    {% else %}
+    <pre class="mb-0 small">{{ event.event_data | json_encode }}</pre>
+    {% endif %}
+</div>

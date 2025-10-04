@@ -1,0 +1,20 @@
+{% set type_value = event_type | default(value="") %}
+{% set type_key = type_value | lower %}
+{% set event_label = "Неизвестное событие" %}
+{% set event_class = "badge text-bg-secondary" %}
+{% if type_key == "comment" %}
+{% set event_label = "Комментарий" %}
+{% set event_class = "badge text-bg-info" %}
+{% elif type_key == "statuschanged" %}
+{% set event_label = "Изменение статуса" %}
+{% set event_class = "badge text-bg-primary" %}
+{% elif type_key == "assignmentchanged" %}
+{% set event_label = "Изменение исполнителя" %}
+{% set event_class = "badge text-bg-success" %}
+{% elif type_key == "metadataupdated" %}
+{% set event_label = "Обновление данных" %}
+{% set event_class = "badge text-bg-warning" %}
+{% elif type_value != "" %}
+{% set event_label = type_value %}
+{% endif %}
+<span class="{{ event_class }}">{{ event_label }}</span>

@@ -205,7 +205,7 @@ impl From<&DomainTaskAssignment> for NewTaskAssignment {
     }
 }
 
-fn status_to_db(status: TaskStatus) -> &'static str {
+pub(crate) fn status_to_db(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Pending => "Pending",
         TaskStatus::InProgress => "InProgress",
