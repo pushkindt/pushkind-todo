@@ -40,8 +40,8 @@
     {% elif type_key == "metadataupdated" %}
     <div class="vstack gap-2">
         {% for key, change in event.event_data %}
-        {% set previous = change['from'] | default(value=none) %}
-        {% set current = change['to'] | default(value=none) %}
+        {% set previous = change['from'] %}
+        {% set current = change['to'] %}
         <div>
             <div class="fw-semibold">{{ macros::metadata_label(key=key) }}</div>
             <div class="text-muted small">Было</div>

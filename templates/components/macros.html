@@ -35,7 +35,7 @@
 {% endmacro metadata_label %}
 
 {% macro metadata_value(key, value) %}
-{% if value is null or value == "" %}
+{% if not value %}
 <span class="text-muted">—</span>
 {% elif key == 'description' %}
 <div class="small">{{ value | safe }}</div>
