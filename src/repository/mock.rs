@@ -21,7 +21,7 @@ mock! {
     pub UserWriter {}
 
     impl UserWriter for UserWriter {
-        fn create_user(&self, new_user: &NewUser) -> RepositoryResult<User>;
+        fn create_or_update_user(&self, new_user: &NewUser) -> RepositoryResult<User>;
         fn update_user(&self, user_id: i32, hub_id: i32, updates: &UpdateUser) -> RepositoryResult<User>;
         fn delete_user(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()>;
     }

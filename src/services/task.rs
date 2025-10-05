@@ -11,11 +11,9 @@ use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::{
     task::Task,
     task_event::{NewTaskEvent, TaskEvent, TaskEventType},
-    user::{NewUser, User},
+    user::User,
 };
-use crate::forms::task::{
-    AssigneeSelection, NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskForm,
-};
+use crate::forms::task::{NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskForm};
 use crate::models::task::status_to_db;
 use crate::repository::{
     TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
@@ -215,19 +213,15 @@ where
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
-    let desired_assignee = resolve_assignee(repo, user, assignee)?;
-
-    match desired_assignee {
-        Some(assignee_id) => {
-            if current_task.assigned_to != Some(assignee_id) {
-                updates = updates.assign_to(assignee_id);
+    match assignee {
+        Some(assignee) => {
+            let new_user = assignee.into_new_user(user.hub_id);
+            let assignee = repo.create_or_update_user(&new_user)?;
+            if current_task.assigned_to != Some(assignee.id) {
+                updates = updates.assign_to(assignee.id);
             }
         }
-        None => {
-            if current_task.assigned_to.is_some() {
-                updates = updates.unassign();
-            }
-        }
+        None => updates = updates.unassign(),
     }
 
     let updated = repo
@@ -323,7 +317,8 @@ where
         || assignment_event_data.is_some()
         || metadata_event_data.is_some()
     {
-        let actor = resolve_or_create_current_user(repo, user)?;
+        let new_user = user.into();
+        let actor = repo.create_or_update_user(&new_user)?;
 
         if let Some(data) = status_event_data {
             let event = NewTaskEvent::new(
@@ -386,7 +381,8 @@ where
         .ok_or(ServiceError::NotFound)?;
 
     let submission = form.into_submission();
-    let author = resolve_or_create_current_user(repo, user)?;
+    let new_user = user.into();
+    let author = repo.create_or_update_user(&new_user)?;
 
     let event = NewTaskEvent::new(
         task_id,
@@ -401,75 +397,6 @@ where
         message: "Комментарий добавлен.".to_string(),
         redirect_to: format!("/task/{}", task_id),
     })
-}
-
-fn resolve_assignee<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
-    selection: Option<AssigneeSelection>,
-) -> ServiceResult<Option<i32>>
-where
-    R: UserReader + UserWriter + ?Sized,
-{
-    let Some(selection) = selection else {
-        return Ok(None);
-    };
-
-    let AssigneeSelection { id, name, email } = selection;
-
-    let email = email
-        .as_ref()
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            id.as_ref()
-                .map(|value| value.trim().to_lowercase())
-                .filter(|value| value.contains('@'))
-        })
-        .ok_or_else(|| ServiceError::Form("Укажите email исполнителя.".to_string()))?;
-
-    if let Some(existing) = repo
-        .get_user_by_email(&email, user.hub_id)
-        .map_err(ServiceError::from)?
-    {
-        return Ok(Some(existing.id));
-    }
-
-    let display_name = name
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| derive_name_from_email(&email));
-
-    let new_user = NewUser::new(user.hub_id, display_name, email.clone());
-    let created = repo.create_user(&new_user).map_err(ServiceError::from)?;
-
-    Ok(Some(created.id))
-}
-
-fn resolve_or_create_current_user<R>(repo: &R, user: &AuthenticatedUser) -> ServiceResult<User>
-where
-    R: UserReader + UserWriter + ?Sized,
-{
-    match repo
-        .get_user_by_email(&user.email, user.hub_id)
-        .map_err(ServiceError::from)?
-    {
-        Some(existing) => Ok(existing),
-        None => {
-            let new_user = NewUser::new(user.hub_id, user.name.clone(), user.email.clone());
-            repo.create_user(&new_user).map_err(ServiceError::from)
-        }
-    }
-}
-
-fn derive_name_from_email(email: &str) -> String {
-    email
-        .split('@')
-        .find(|segment| !segment.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| email.to_string())
 }
 
 fn assignment_event_user(user: &User) -> Value {
@@ -1022,7 +949,10 @@ mod tests {
     }
 
     impl UserWriter for UpdateRepo {
-        fn create_user(&self, new_user: &crate::domain::user::NewUser) -> RepositoryResult<User> {
+        fn create_or_update_user(
+            &self,
+            new_user: &crate::domain::user::NewUser,
+        ) -> RepositoryResult<User> {
             let id = {
                 let mut counter = self.next_user_id.borrow_mut();
                 let id = *counter;

@@ -52,6 +52,15 @@ impl<'a> From<&'a DomainNewUser> for NewUser<'a> {
     }
 }
 
+impl<'a> From<&'a DomainNewUser> for UpdateUser<'a> {
+    fn from(value: &'a DomainNewUser) -> Self {
+        Self {
+            name: Some(value.name.as_str()),
+            updated_at: chrono::Utc::now().naive_utc(),
+        }
+    }
+}
+
 impl<'a> From<&'a DomainUpdateUser> for UpdateUser<'a> {
     fn from(value: &'a DomainUpdateUser) -> Self {
         Self {

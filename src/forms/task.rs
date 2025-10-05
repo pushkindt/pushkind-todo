@@ -4,7 +4,10 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use validator::Validate;
 
-use crate::domain::task::{TaskStatus, UpdateTask};
+use crate::domain::{
+    task::{TaskStatus, UpdateTask},
+    user::NewUser,
+};
 
 /// Form payload submitted from the task edit modal.
 #[derive(Debug, Deserialize, Validate)]
@@ -111,12 +114,21 @@ pub struct TaskUpdateSubmission {
 /// User data captured by the modal when assigning a task.
 #[derive(Debug, Clone)]
 pub struct AssigneeSelection {
-    /// External identifier returned by the identity provider (when available).
-    pub id: Option<String>,
     /// Display name for the selected user.
-    pub name: Option<String>,
+    pub name: String,
     /// Email address for the selected user.
-    pub email: Option<String>,
+    pub email: String,
+}
+
+impl AssigneeSelection {
+    /// Convert the selection into a new user payload.
+    pub fn into_new_user(self, hub_id: i32) -> NewUser {
+        NewUser {
+            hub_id,
+            name: self.name,
+            email: self.email.to_lowercase(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -131,16 +143,12 @@ pub struct AssigneeSelectionForm {
 
 impl AssigneeSelectionForm {
     fn into_selection(self) -> Option<AssigneeSelection> {
-        let selection = AssigneeSelection {
-            id: self.id,
-            name: self.name,
-            email: self.email.map(|value| value.to_lowercase()),
-        };
-
-        if selection.id.is_none() && selection.name.is_none() && selection.email.is_none() {
-            None
-        } else {
-            Some(selection)
+        match self.email {
+            Some(email) => Some(AssigneeSelection {
+                name: self.name.unwrap_or_default(),
+                email,
+            }),
+            None => None,
         }
     }
 }

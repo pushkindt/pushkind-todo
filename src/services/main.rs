@@ -5,10 +5,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::{
-    task::Task,
-    user::{NewUser, User},
-};
+use crate::domain::task::Task;
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
@@ -81,7 +78,8 @@ where
         return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
     }
 
-    let author = resolve_or_create_author(repo, user)?;
+    let new_user = user.into();
+    let author = repo.create_or_update_user(&new_user)?;
 
     let new_task = match form.into_new_task(user.hub_id, author.id) {
         Some(task) => task,
@@ -115,7 +113,8 @@ where
         return Err(ServiceError::Unauthorized);
     }
 
-    let author = resolve_or_create_author(repo, user)?;
+    let new_user = user.into();
+    let author = repo.create_or_update_user(&new_user)?;
 
     let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
@@ -133,22 +132,6 @@ where
         message: "Задачи добавлены.".to_string(),
         redirect_to: "/".to_string(),
     })
-}
-
-fn resolve_or_create_author<R>(repo: &R, user: &AuthenticatedUser) -> ServiceResult<User>
-where
-    R: UserReader + UserWriter + ?Sized,
-{
-    match repo
-        .get_user_by_email(&user.email, user.hub_id)
-        .map_err(ServiceError::from)?
-    {
-        Some(existing) => Ok(existing),
-        None => {
-            let new_user = NewUser::new(user.hub_id, user.name.clone(), user.email.clone());
-            repo.create_user(&new_user).map_err(ServiceError::from)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -299,11 +282,11 @@ mod tests {
     }
 
     impl UserWriter for TaskWriterUserRepo {
-        fn create_user(
+        fn create_or_update_user(
             &self,
             new_user: &crate::domain::user::NewUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
-            self.user_writer.create_user(new_user)
+            self.user_writer.create_or_update_user(new_user)
         }
 
         fn update_user(
@@ -485,7 +468,7 @@ mod tests {
                 Ok(Some(author.clone()))
             });
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_writer.expect_create_or_update_user().never();
 
         repo.task_writer
             .expect_create_task()
@@ -545,7 +528,7 @@ mod tests {
             });
 
         repo.user_writer
-            .expect_create_user()
+            .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
                 assert_eq!(new_user.hub_id, expected_hub);
@@ -592,7 +575,7 @@ mod tests {
                 Ok(Some(author.clone()))
             });
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_writer.expect_create_or_update_user().never();
 
         repo.task_writer
             .expect_create_task()
@@ -652,7 +635,7 @@ foo,bar
                 Ok(Some(author.clone()))
             });
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_writer.expect_create_or_update_user().never();
 
         repo.task_writer.expect_create_task().never();
 
@@ -694,7 +677,7 @@ beta,
                 Ok(Some(author.clone()))
             });
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_writer.expect_create_or_update_user().never();
 
         repo.task_writer
             .expect_create_task()
@@ -770,7 +753,7 @@ alpha,
             });
 
         repo.user_writer
-            .expect_create_user()
+            .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
                 assert_eq!(new_user.hub_id, expected_hub);
