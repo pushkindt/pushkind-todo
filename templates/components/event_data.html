@@ -25,23 +25,23 @@
         </div>
     </div>
     {% elif type_key == "assignmentchanged" %}
-    {% set previous = event.event_data['from'] | default(value=none) %}
-    {% set current = event.event_data['to'] | default(value=none) %}
+    {% set previous = event.event_data['from'] %}
+    {% set current = event.event_data['to'] %}
     <div class="d-flex flex-column gap-2">
         <div>
             <div class="text-muted small">Было</div>
-            {{ macros::assignment_user(value=previous) }}
+            {{ macros::assignment_user(user=previous) }}
         </div>
         <div>
             <div class="text-muted small">Стало</div>
-            {{ macros::assignment_user(value=current) }}
+            {{ macros::assignment_user(user=current) }}
         </div>
     </div>
     {% elif type_key == "metadataupdated" %}
     <div class="vstack gap-2">
         {% for key, change in event.event_data %}
-        {% set previous = change['from'] | default(value=none) %}
-        {% set current = change['to'] | default(value=none) %}
+        {% set previous = change['from'] %}
+        {% set current = change['to'] %}
         <div>
             <div class="fw-semibold">{{ macros::metadata_label(key=key) }}</div>
             <div class="text-muted small">Было</div>
