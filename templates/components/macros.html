@@ -1,45 +1,189 @@
-{% macro status_badge(value) %}
-{% if value %}
-{% set status = value %}
-{% include 'components/task_status.html' %}
-{% else %}
-<span class="text-muted">—</span>
-{% endif %}
-{% endmacro status_badge %}
-
-{% macro assignment_user(user) %}
-{% if user %}
-<div>
-    <span class="fw-semibold">{{ user.name | default(value="Без имени") }}</span>
-    {% if user.email %}
-    <span class="text-muted ms-1">{{ user.email }}</span>
+{% macro task_status(value) %}
+    {% if value %}
+        {% set status_key = value | default(value="pending") | lower %}
+        {% set status_label = status_key %}
+        {% set status_class = "badge text-bg-secondary" %}
+        {% if status_key == "pending" %}
+            {% set status_label = "В ожидании" %}
+            {% set status_class = "badge text-bg-warning" %}
+        {% elif status_key == "inprogress" %}
+            {% set status_label = "В работе" %}
+            {% set status_class = "badge text-bg-primary" %}
+        {% elif status_key == "blocked" %}
+            {% set status_label = "Заблокирована" %}
+            {% set status_class = "badge text-bg-danger" %}
+        {% elif status_key == "completed" %}
+            {% set status_label = "Завершена" %}
+            {% set status_class = "badge text-bg-success" %}
+        {% elif status_key == "archived" %}
+            {% set status_label = "Архивирована" %}
+            {% set status_class = "badge text-bg-dark" %}
+        {% endif %}
+        <span class="{{ status_class }}">{{ status_label }}</span>
+    {% else %}
+        <span class="text-muted">—</span>
     {% endif %}
-</div>
-{% else %}
-<span class="text-muted">Исполнитель не назначен</span>
-{% endif %}
-{% endmacro assignment_user %}
+{% endmacro task_status %}
+
+{% macro user_popover(user) %}
+    {% if user %}
+        <a  role="button"
+            tabindex="0"
+            data-bs-trigger="focus"
+            data-bs-toggle="popover"
+            title="{{user.name}}"
+            data-bs-content="{{user.email}}"
+            data-bs-original-title="{{user.name}}"
+            aria-label="{{user.name}}">
+            <i class="bi bi-person-circle"></i>&nbsp;{{user.name}}
+        </a>
+    {% else %}
+        <span class="text-muted">—</span>
+    {% endif %}
+{% endmacro user_popover %}
 
 {% macro metadata_label(key) %}
-{% if key == 'title' %}
-Название
-{% elif key == 'description' %}
-Описание
-{% elif key == 'due_date' %}
-Срок
-{% elif key == 'completed_at' %}
-Завершение
-{% else %}
-{{ key | replace(from="_", to=" ") | capitalize }}
-{% endif %}
+    {% if key == 'title' %}
+        Название
+    {% elif key == 'description' %}
+        Описание
+    {% elif key == 'due_date' %}
+        Срок
+    {% elif key == 'completed_at' %}
+        Завершение
+    {% else %}
+        {{ key | replace(from="_", to=" ") | capitalize }}
+    {% endif %}
 {% endmacro metadata_label %}
 
 {% macro metadata_value(key, value) %}
-{% if not value %}
-<span class="text-muted">—</span>
-{% elif key == 'description' %}
-<div class="small">{{ value | safe }}</div>
-{% else %}
-{{ value }}
-{% endif %}
+    {% if not value %}
+        <span class="text-muted">—</span>
+    {% elif key == 'description' %}
+        <div class="small">{{ value | safe }}</div>
+    {% else %}
+        {{ value }}
+    {% endif %}
 {% endmacro metadata_value %}
+
+{% macro task_description(description) %}
+    <div class="p-1 border rounded">
+        {{ description | default(value="—") | safe }}
+    </div>
+{% endmacro task_description %}
+
+{% macro pagination(pages, current_page=1, search_query="") %}
+    {% if pages | length > 1 %}
+        <nav aria-label="pagination">
+            <ul class="pagination justify-content-center flex-wrap" id="pagination">
+                {% for page in pages %}
+                    {% if page %}
+                        {% if page != current_page %}
+                            <li class="page-item">
+                            <a class="page-link" href="?page={{page}}{% if search_query %}&q={{search_query}}{% endif %}">
+                                    {{ page }}
+                                </a>
+                            </li>
+                        {% else %}
+                            <li class="page-item active" aria-current="page">
+                                <span class="page-link">{{ page }}</span>
+                            </li>
+                        {% endif %}
+                    {% else %}
+                        <li class="page-item">
+                            <span class="ellipsis">…</span>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endif %}
+{% endmacro pagination %}
+
+{% macro event_type(event) %}
+    {% set type_value = event.event_type | default(value="") %}
+    {% set type_key = type_value | lower %}
+    {% set event_label = "Неизвестное событие" %}
+    {% set event_class = "badge text-bg-secondary" %}
+    {% if type_key == "comment" %}
+        {% set event_label = "Комментарий" %}
+        {% set event_class = "badge text-bg-info" %}
+        {% elif type_key == "statuschanged" %}
+        {% set event_label = "Изменение статуса" %}
+        {% set event_class = "badge text-bg-primary" %}
+    {% elif type_key == "assignmentchanged" %}
+        {% set event_label = "Изменение исполнителя" %}
+        {% set event_class = "badge text-bg-success" %}
+    {% elif type_key == "metadataupdated" %}
+        {% set event_label = "Обновление данных" %}
+        {% set event_class = "badge text-bg-warning" %}
+    {% elif type_value != "" %}
+        {% set event_label = type_value %}
+    {% endif %}
+    <span class="{{ event_class }}">{{ event_label }}</span>
+{% endmacro event_type %}
+
+{% macro event_data(event) %}
+
+    {% set type_value = event.event_type | default(value="") %}
+    {% set type_key = type_value | lower %}
+
+    <div class="mt-2 mb-0 bg-light p-2 rounded">
+        {% if type_key == "comment" %}
+            {% set text = event.event_data['text'] | default(value="") %}
+            {% if text %}
+                <p class="mb-0">{{ text }}</p>
+            {% else %}
+                <span class="text-muted">Комментарий без текста.</span>
+            {% endif %}
+        {% elif type_key == "statuschanged" %}
+            {% set previous = event.event_data['from'] | default(value="") %}
+            {% set current = event.event_data['to'] | default(value="") %}
+            <div class="d-flex flex-column gap-1">
+                <div>
+                    <span class="text-muted me-2">Было:</span>
+                    {{ macros::task_status(value=previous) }}
+                </div>
+                <div>
+                    <span class="text-muted me-2">Стало:</span>
+                    {{ macros::task_status(value=current) }}
+                </div>
+            </div>
+        {% elif type_key == "assignmentchanged" %}
+            {% set previous = event.event_data['from'] %}
+            {% set current = event.event_data['to'] %}
+            <div class="d-flex flex-column gap-2">
+                <div>
+                    <div class="text-muted small">Было</div>
+                    {{ macros::user_popover(user=previous) }}
+                </div>
+                <div>
+                    <div class="text-muted small">Стало</div>
+                    {{ macros::user_popover(user=current) }}
+                </div>
+            </div>
+        {% elif type_key == "metadataupdated" %}
+            <div class="vstack gap-2">
+                {% for key, change in event.event_data %}
+                    {% set previous = change['from'] %}
+                    {% set current = change['to'] %}
+                    <div>
+                        <div class="fw-semibold">{{ macros::metadata_label(key=key) }}</div>
+                        <div class="text-muted small">Было</div>
+                        <div class="mb-1">
+                            {{ macros::metadata_value(key=key, value=previous) }}
+                        </div>
+                        <div class="text-muted small">Стало</div>
+                        <div>
+                            {{ macros::metadata_value(key=key, value=current) }}
+                        </div>
+                    </div>
+                {% else %}
+                    <span class="text-muted">Изменения не найдены.</span>
+                {% endfor %}
+            </div>
+        {% else %}
+            <pre class="mb-0 small">{{ event.event_data | json_encode }}</pre>
+        {% endif %}
+    </div>
+{% endmacro event_data %}
