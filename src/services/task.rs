@@ -953,6 +953,10 @@ mod tests {
             &self,
             new_user: &crate::domain::user::NewUser,
         ) -> RepositoryResult<User> {
+            if let Some(existing) = self.user_by_email(&new_user.email) {
+                return Ok(existing);
+            }
+
             let id = {
                 let mut counter = self.next_user_id.borrow_mut();
                 let id = *counter;
@@ -1222,9 +1226,21 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let result = update_task(&repo, &user, 11, form);
+        let outcome = update_task(&repo, &user, 11, form).expect("expected update to succeed");
 
-        assert!(matches!(result, Err(ServiceError::Form(_))));
+        assert_eq!(outcome.message, "Задача обновлена.");
+        assert_eq!(outcome.redirect_to, "/task/11");
+
+        {
+            let stored = repo.task.borrow();
+            assert_eq!(stored.title, "Updated");
+            assert!(stored.assigned_to.is_none());
+        }
+
+        let events = repo.events.borrow();
+        assert_eq!(events.len(), 1);
+        let metadata_event = &events[0];
+        assert_eq!(metadata_event.event_type, TaskEventType::MetadataUpdated);
     }
 
     #[test]
