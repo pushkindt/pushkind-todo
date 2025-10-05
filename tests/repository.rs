@@ -153,8 +153,8 @@ fn test_task_event_repository_crud() {
 
     let events = repo.list_events_for_task(task.id, 1).expect("list events");
     assert_eq!(events.len(), 2);
-    assert_eq!(events[0].id, comment.id);
-    assert_eq!(events[1].id, status.id);
+    assert_eq!(events[0].id, status.id);
+    assert_eq!(events[1].id, comment.id);
 
     let cross_events = repo
         .list_events_for_task(task.id, 2)
