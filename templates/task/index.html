@@ -1,4 +1,3 @@
-{% import "components/macros.html" as macros %}
 {% extends 'base.html' %}
 
 {% block styles %}
@@ -16,8 +15,7 @@
         <div class="card-header d-flex justify-content-between align-items-center">
             <h2 class="h5 mb-0">{{ task.title }}</h2>
             <div class="d-flex align-items-center gap-2">
-                {% set status = task.status %}
-                {% include 'components/task_status.html' %}
+                {{ macros::task_status(value=task.status) }}
                 <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal"
                     data-bs-target="#modifyTaskModal" hx-post="/task/modal/{{task.id}}" hx-swap="innerHTML"
                     hx-target="#taskModalBody" title="Редактировать задачу">
@@ -31,19 +29,17 @@
                     <dl class="row mb-0">
                         <dt class="col-sm-4">Идентификатор</dt>
                         <dd class="col-sm-8">{{ task.id }}</dd>
-
-                        <dt class="col-sm-4">Описание</dt>
-                        <dd class="col-sm-8">
-                            {% include 'components/task_description.html' %}
-                        </dd>
-
                         <dt class="col-sm-4">Срок</dt>
                         <dd class="col-sm-8">
                             {% if task.due_date %}
-                            {{ task.due_date }}
+                                {{ task.due_date }}
                             {% else %}
-                            —
+                                —
                             {% endif %}
+                        </dd>
+                        <dt class="col-sm-4">Исполнитель</dt>
+                        <dd class="col-sm-8">
+                            {{ macros::user_popover(user=assignee) }}
                         </dd>
                     </dl>
                 </div>
@@ -57,22 +53,15 @@
 
                         <dt class="col-sm-4">Автор</dt>
                         <dd class="col-sm-8">
-                            {% set user = author %}
-                            {% include 'components/user_popover.html' %}
+                            {{ macros::user_popover(user=author) }}
                         </dd>
                     </dl>
                 </div>
             </div>
-
             <div class="row">
-                <div class="col-md-6">
-                    <h3 class="h6">Исполнитель</h3>
-                    {% if assignee %}
-                    <p class="mb-0"><strong>{{ assignee.name }}</strong></p>
-                    <p class="mb-0 text-muted">{{ assignee.email }}</p>
-                    {% else %}
-                    <p class="text-muted mb-0">Исполнитель не назначен.</p>
-                    {% endif %}
+                <div class="col">
+                    <h6>Описание:</h6>
+                    {{ macros::task_description(description=task.description) }}
                 </div>
             </div>
         </div>
@@ -102,31 +91,23 @@
         </div>
         <div class="list-group list-group-flush">
             {% for item in events %}
-            <div class="list-group-item">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        {% set event_type = item.event.event_type %}
-                        {% include 'components/event_type.html' %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            {{ macros::event_type(event=item.event) }}
+                        </div>
+                        <small class="text-muted">{{ item.event.created_at | date }}</small>
                     </div>
-                    <small class="text-muted">{{ item.event.created_at | date }}</small>
+                    <div class="mt-2">
+                        <strong>Автор события:</strong>
+                        {{ macros::user_popover(user=item.author) }}
+                    </div>
+                    {{ macros::event_data(event=item.event) }}
                 </div>
-                <div class="mt-2">
-                    <strong>Автор события:</strong>
-                    {% if item.author %}
-                    {% set user = item.author %}
-                    {% include 'components/user_popover.html' %}
-                    {% else %}
-                    —
-                    {% endif %}
-                </div>
-
-
-                {% include 'components/event_data.html' %}
-            </div>
             {% else %}
-            <div class="list-group-item">
-                <p class="mb-0 text-muted">Для этой задачи пока нет событий.</p>
-            </div>
+                <div class="list-group-item">
+                    <p class="mb-0 text-muted">Для этой задачи пока нет событий.</p>
+                </div>
             {% endfor %}
         </div>
     </div>

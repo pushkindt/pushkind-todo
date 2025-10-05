@@ -61,12 +61,11 @@
             </div>
             <div class="col-sm">
                 <span class="d-sm-none fw-bold">Описание:</span>
-                {% include 'components/task_description.html' %}
+                {{ macros::task_description(description=task.description) }}
             </div>
             <div class="col-sm-2">
                 <span class="d-sm-none fw-bold">Статус:</span>
-                {% set status = task.status %}
-                {% include 'components/task_status.html' %}
+                {{ macros::task_status(value=task.status) }}
             </div>
         </div>
         {% else %}
@@ -75,8 +74,8 @@
         </div>
         {% endfor %}
     </div>
-    {% set items = tasks %}
-    {% include 'components/pagination.html' %}
+
+    {{ macros::pagination(pages=tasks.pages) }}
 </div>
 
 {% include 'main/add_task_modal.html' %}
