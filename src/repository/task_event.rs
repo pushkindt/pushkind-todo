@@ -31,7 +31,7 @@ impl TaskEventReader for DieselRepository {
             .inner_join(tasks::table)
             .filter(task_events::task_id.eq(task_id))
             .filter(tasks::hub_id.eq(hub_id))
-            .order(task_events::created_at.asc())
+            .order(task_events::created_at.desc())
             .select(DbTaskEvent::as_select())
             .load::<DbTaskEvent>(&mut conn)?;
 
