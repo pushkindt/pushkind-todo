@@ -43,17 +43,33 @@ pub enum TaskEventModelError {
 
 impl TaskEvent {
     pub fn try_into_domain(self) -> Result<DomainTaskEvent, TaskEventModelError> {
-        let event_type = event_type_from_db(&self.event_type)?;
-        let event_data = serde_json::from_str(&self.event_data)
+        let Self {
+            id,
+            task_id,
+            user_id,
+            event_type: raw_event_type,
+            event_data: raw_event_data,
+            created_at,
+        } = self;
+
+        let event_type = TaskEventType::from(raw_event_type.as_str());
+        let canonical: &'static str = event_type.into();
+        if canonical != raw_event_type.as_str() {
+            return Err(TaskEventModelError::UnknownEventType {
+                event_type: raw_event_type,
+            });
+        }
+
+        let event_data = serde_json::from_str(&raw_event_data)
             .map_err(|source| TaskEventModelError::InvalidEventData { source })?;
 
         Ok(DomainTaskEvent {
-            id: self.id,
-            task_id: self.task_id,
-            user_id: self.user_id,
+            id,
+            task_id,
+            user_id,
             event_type,
             event_data,
-            created_at: self.created_at,
+            created_at,
         })
     }
 }
@@ -73,33 +89,14 @@ impl TryFrom<&DomainNewTaskEvent> for NewTaskEvent {
         let event_data = serde_json::to_string(&value.event_data)
             .map_err(|source| TaskEventModelError::SerializationFailed { source })?;
 
+        let event_type: &'static str = value.event_type.into();
+
         Ok(Self {
             task_id: value.task_id,
             user_id: value.user_id,
-            event_type: event_type_to_db(value.event_type).to_string(),
+            event_type: event_type.to_string(),
             event_data,
             created_at: value.created_at,
         })
-    }
-}
-
-fn event_type_from_db(value: &str) -> Result<TaskEventType, TaskEventModelError> {
-    match value {
-        "Comment" => Ok(TaskEventType::Comment),
-        "StatusChanged" => Ok(TaskEventType::StatusChanged),
-        "AssignmentChanged" => Ok(TaskEventType::AssignmentChanged),
-        "MetadataUpdated" => Ok(TaskEventType::MetadataUpdated),
-        other => Err(TaskEventModelError::UnknownEventType {
-            event_type: other.to_string(),
-        }),
-    }
-}
-
-fn event_type_to_db(value: TaskEventType) -> &'static str {
-    match value {
-        TaskEventType::Comment => "Comment",
-        TaskEventType::StatusChanged => "StatusChanged",
-        TaskEventType::AssignmentChanged => "AssignmentChanged",
-        TaskEventType::MetadataUpdated => "MetadataUpdated",
     }
 }

@@ -96,55 +96,67 @@ impl From<Task> for DomainTask {
             completed_at,
         } = value;
 
-        match status_from_db(&status_text) {
-            Ok(status) => Self {
-                id,
-                hub_id,
-                title,
-                description,
-                status,
-                due_date,
-                assigned_to,
-                author_id,
-                created_at,
-                updated_at,
-                completed_at,
-            },
-            Err(err) => {
-                log::warn!("Failed to decode task status: {err}");
-                Self {
-                    id,
-                    hub_id,
-                    title,
-                    description,
-                    status: TaskStatus::Pending,
-                    due_date,
-                    assigned_to,
-                    author_id,
-                    created_at,
-                    updated_at,
-                    completed_at,
-                }
+        let status = {
+            let candidate = TaskStatus::from(status_text.as_str());
+            let canonical: &'static str = candidate.into();
+            if canonical == status_text.as_str() {
+                candidate
+            } else {
+                log::warn!("Failed to decode task status '{}'", status_text);
+                TaskStatus::Pending
             }
+        };
+
+        Self {
+            id,
+            hub_id,
+            title,
+            description,
+            status,
+            due_date,
+            assigned_to,
+            author_id,
+            created_at,
+            updated_at,
+            completed_at,
         }
     }
 }
 
 impl Task {
     pub fn try_into_domain(self) -> Result<DomainTask, TaskModelError> {
-        let status = status_from_db(&self.status)?;
+        let Self {
+            id,
+            hub_id,
+            title,
+            description,
+            status: raw_status,
+            due_date,
+            assigned_to,
+            author_id,
+            created_at,
+            updated_at,
+            completed_at,
+        } = self;
+
+        let status = TaskStatus::from(raw_status.as_str());
+        let canonical: &'static str = status.into();
+        if canonical != raw_status.as_str() {
+            return Err(TaskModelError::UnknownStatus { status: raw_status });
+        }
+
         Ok(DomainTask {
-            id: self.id,
-            hub_id: self.hub_id,
-            title: self.title,
-            description: self.description,
+            id,
+            hub_id,
+            title,
+            description,
             status,
-            due_date: self.due_date,
-            assigned_to: self.assigned_to,
-            author_id: self.author_id,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            completed_at: self.completed_at,
+            due_date,
+            assigned_to,
+            author_id,
+            created_at,
+            updated_at,
+            completed_at,
         })
     }
 }
@@ -155,7 +167,7 @@ impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
             hub_id: value.hub_id,
             title: value.title.as_str(),
             description: value.description.as_deref(),
-            status: status_to_db(value.status),
+            status: <&'static str>::from(value.status),
             due_date: value.due_date,
             assigned_to: value.assigned_to,
             author_id: value.author_id,
@@ -174,7 +186,7 @@ impl<'a> From<&'a DomainUpdateTask> for UpdateTask<'a> {
                 .description
                 .as_ref()
                 .map(|opt| opt.as_ref().map(|text| text.as_str())),
-            status: value.status.map(status_to_db),
+            status: value.status.map(<&'static str>::from),
             due_date: value.due_date,
             assigned_to: value.assigned_to,
             completed_at: value.completed_at,
@@ -202,28 +214,5 @@ impl From<&DomainTaskAssignment> for NewTaskAssignment {
             assignee_id: value.assignee_id,
             assigned_at: value.assigned_at,
         }
-    }
-}
-
-pub(crate) fn status_to_db(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Pending => "Pending",
-        TaskStatus::InProgress => "InProgress",
-        TaskStatus::Blocked => "Blocked",
-        TaskStatus::Completed => "Completed",
-        TaskStatus::Archived => "Archived",
-    }
-}
-
-fn status_from_db(status: &str) -> Result<TaskStatus, TaskModelError> {
-    match status {
-        "Pending" => Ok(TaskStatus::Pending),
-        "InProgress" => Ok(TaskStatus::InProgress),
-        "Blocked" => Ok(TaskStatus::Blocked),
-        "Completed" => Ok(TaskStatus::Completed),
-        "Archived" => Ok(TaskStatus::Archived),
-        other => Err(TaskModelError::UnknownStatus {
-            status: other.to_string(),
-        }),
     }
 }
