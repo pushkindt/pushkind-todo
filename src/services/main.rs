@@ -5,10 +5,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::{
-    task::Task,
-    user::{NewUser, User},
-};
+use crate::domain::task::Task;
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
@@ -81,7 +78,8 @@ where
         return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
     }
 
-    let author = resolve_or_create_author(repo, user)?;
+    let new_user = user.into();
+    let author = repo.create_or_update_user(&new_user)?;
 
     let new_task = match form.into_new_task(user.hub_id, author.id) {
         Some(task) => task,
@@ -115,7 +113,8 @@ where
         return Err(ServiceError::Unauthorized);
     }
 
-    let author = resolve_or_create_author(repo, user)?;
+    let new_user = user.into();
+    let author = repo.create_or_update_user(&new_user)?;
 
     let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
@@ -133,22 +132,6 @@ where
         message: "Задачи добавлены.".to_string(),
         redirect_to: "/".to_string(),
     })
-}
-
-fn resolve_or_create_author<R>(repo: &R, user: &AuthenticatedUser) -> ServiceResult<User>
-where
-    R: UserReader + UserWriter + ?Sized,
-{
-    match repo
-        .get_user_by_email(&user.email, user.hub_id)
-        .map_err(ServiceError::from)?
-    {
-        Some(existing) => Ok(existing),
-        None => {
-            let new_user = NewUser::new(user.hub_id, user.name.clone(), user.email.clone());
-            repo.create_user(&new_user).map_err(ServiceError::from)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -299,11 +282,11 @@ mod tests {
     }
 
     impl UserWriter for TaskWriterUserRepo {
-        fn create_user(
+        fn create_or_update_user(
             &self,
             new_user: &crate::domain::user::NewUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
-            self.user_writer.create_user(new_user)
+            self.user_writer.create_or_update_user(new_user)
         }
 
         fn update_user(
@@ -471,21 +454,27 @@ mod tests {
         };
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let author = sample_user_record(7, expected_hub, &expected_email, &user.name);
+        let expected_email_lower = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(7, expected_hub, &expected_email_lower, &expected_name);
         let expected_author_id = author.id;
         let hub_for_return = expected_hub;
 
-        repo.user_reader
-            .expect_get_user_by_email()
-            .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email);
-                assert_eq!(hub, expected_hub);
-                Ok(Some(author.clone()))
-            });
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name_for_create = expected_name.clone();
+        let author_for_create = author.clone();
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_reader.expect_get_user_by_email().never();
+
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(author_for_create.clone())
+            });
 
         repo.task_writer
             .expect_create_task()
@@ -523,9 +512,7 @@ mod tests {
         };
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let expected_email_for_lookup = expected_email.clone();
-        let expected_email_lower = expected_email.to_lowercase();
+        let expected_email_lower = user.email.to_lowercase();
         let expected_email_for_create = expected_email_lower.clone();
         let expected_name = user.name.clone();
         let expected_name_for_create = expected_name.clone();
@@ -535,17 +522,10 @@ mod tests {
         let hub_for_return = expected_hub;
         let created_author_for_create = created_author.clone();
 
-        repo.user_reader
-            .expect_get_user_by_email()
-            .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email_for_lookup);
-                assert_eq!(hub, expected_hub);
-                Ok(None)
-            });
+        repo.user_reader.expect_get_user_by_email().never();
 
         repo.user_writer
-            .expect_create_user()
+            .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
                 assert_eq!(new_user.hub_id, expected_hub);
@@ -579,20 +559,26 @@ mod tests {
         };
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let author = sample_user_record(8, expected_hub, &expected_email, &user.name);
+        let expected_email_lower = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(8, expected_hub, &expected_email_lower, &expected_name);
         let expected_author_id = author.id;
 
-        repo.user_reader
-            .expect_get_user_by_email()
-            .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email);
-                assert_eq!(hub, expected_hub);
-                Ok(Some(author.clone()))
-            });
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name_for_create = expected_name.clone();
+        let author_for_create = author.clone();
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_reader.expect_get_user_by_email().never();
+
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(author_for_create.clone())
+            });
 
         repo.task_writer
             .expect_create_task()
@@ -640,19 +626,25 @@ foo,bar
         );
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let author = sample_user_record(9, expected_hub, &expected_email, &user.name);
+        let expected_email_lower = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(9, expected_hub, &expected_email_lower, &expected_name);
 
-        repo.user_reader
-            .expect_get_user_by_email()
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name_for_create = expected_name.clone();
+        let author_for_create = author.clone();
+
+        repo.user_reader.expect_get_user_by_email().never();
+
+        repo.user_writer
+            .expect_create_or_update_user()
             .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email);
-                assert_eq!(hub, expected_hub);
-                Ok(Some(author.clone()))
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(author_for_create.clone())
             });
-
-        repo.user_writer.expect_create_user().never();
 
         repo.task_writer.expect_create_task().never();
 
@@ -678,23 +670,29 @@ beta,
         );
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let author = sample_user_record(10, expected_hub, &expected_email, &user.name);
+        let expected_email_lower = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(10, expected_hub, &expected_email_lower, &expected_name);
         let expected_author_id = author.id;
         let captured_titles = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let titles_for_closure = std::sync::Arc::clone(&captured_titles);
         let hub_for_return = expected_hub;
 
-        repo.user_reader
-            .expect_get_user_by_email()
-            .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email);
-                assert_eq!(hub, expected_hub);
-                Ok(Some(author.clone()))
-            });
+        let expected_email_for_create = expected_email_lower.clone();
+        let expected_name_for_create = expected_name.clone();
+        let author_for_create = author.clone();
 
-        repo.user_writer.expect_create_user().never();
+        repo.user_reader.expect_get_user_by_email().never();
+
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .returning(move |new_user| {
+                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.name, expected_name_for_create);
+                assert_eq!(new_user.email, expected_email_for_create);
+                Ok(author_for_create.clone())
+            });
 
         repo.task_writer
             .expect_create_task()
@@ -748,9 +746,7 @@ alpha,
         );
 
         let expected_hub = user.hub_id;
-        let expected_email = user.email.clone();
-        let expected_email_for_lookup = expected_email.clone();
-        let expected_email_lower = expected_email.to_lowercase();
+        let expected_email_lower = user.email.to_lowercase();
         let expected_email_for_create = expected_email_lower.clone();
         let expected_name = user.name.clone();
         let expected_name_for_create = expected_name.clone();
@@ -760,17 +756,10 @@ alpha,
         let hub_for_return = expected_hub;
         let created_author_for_create = created_author.clone();
 
-        repo.user_reader
-            .expect_get_user_by_email()
-            .times(1)
-            .returning(move |email, hub| {
-                assert_eq!(email, &expected_email_for_lookup);
-                assert_eq!(hub, expected_hub);
-                Ok(None)
-            });
+        repo.user_reader.expect_get_user_by_email().never();
 
         repo.user_writer
-            .expect_create_user()
+            .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
                 assert_eq!(new_user.hub_id, expected_hub);

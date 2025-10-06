@@ -86,18 +86,23 @@ impl UserReader for DieselRepository {
 }
 
 impl UserWriter for DieselRepository {
-    fn create_user(&self, new_user: &DomainNewUser) -> RepositoryResult<DomainUser> {
+    fn create_or_update_user(&self, new_user: &DomainNewUser) -> RepositoryResult<DomainUser> {
         use crate::schema::users;
 
         let mut conn = self.conn()?;
-        let db_new = DbNewUser::from(new_user);
 
-        let created = diesel::insert_into(users::table)
-            .values(&db_new)
-            .returning(DbUser::as_returning())
+        let db_new_user: DbNewUser = new_user.into();
+
+        let db_update_user: DbUpdateUser = new_user.into();
+
+        let db_user = diesel::insert_into(users::table)
+            .values(&db_new_user)
+            .on_conflict((users::email, users::hub_id))
+            .do_update()
+            .set(&db_update_user)
             .get_result::<DbUser>(&mut conn)?;
 
-        Ok(created.into())
+        Ok(db_user.into())
     }
 
     fn update_user(

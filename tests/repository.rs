@@ -23,8 +23,10 @@ fn test_user_repository_crud() {
     let alice_new = DomainNewUser::new(1, "Alice".to_string(), "ALICE@example.com".to_string());
     let bob_new = DomainNewUser::new(1, "Bob".to_string(), "bob@example.com".to_string());
 
-    let alice = repo.create_user(&alice_new).expect("create alice");
-    let bob = repo.create_user(&bob_new).expect("create bob");
+    let alice = repo
+        .create_or_update_user(&alice_new)
+        .expect("create alice");
+    let bob = repo.create_or_update_user(&bob_new).expect("create bob");
 
     assert_eq!(alice.email, "alice@example.com");
     assert_eq!(bob.email, "bob@example.com");
@@ -102,7 +104,7 @@ fn test_task_event_repository_crud() {
     let repo = DieselRepository::new(test_db.pool());
 
     let author = repo
-        .create_user(&DomainNewUser::new(
+        .create_or_update_user(&DomainNewUser::new(
             1,
             "Event Author".to_string(),
             "author@example.com".to_string(),
@@ -191,7 +193,7 @@ fn test_task_repository_crud() {
     let due_beta = NaiveDate::from_ymd_opt(2024, 2, 1).expect("valid date");
 
     let author = repo
-        .create_user(&DomainNewUser::new(
+        .create_or_update_user(&DomainNewUser::new(
             1,
             "Task Author".to_string(),
             "author@example.com".to_string(),
@@ -199,7 +201,7 @@ fn test_task_repository_crud() {
         .expect("create author user");
 
     let assignee = repo
-        .create_user(&DomainNewUser::new(
+        .create_or_update_user(&DomainNewUser::new(
             1,
             "Task Owner".to_string(),
             "task-owner@example.com".to_string(),

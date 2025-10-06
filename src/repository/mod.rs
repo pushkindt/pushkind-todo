@@ -106,7 +106,7 @@ pub trait UserReader {
 
 /// Write operations over user records.
 pub trait UserWriter {
-    fn create_user(&self, new_user: &NewUser) -> RepositoryResult<User>;
+    fn create_or_update_user(&self, new_user: &NewUser) -> RepositoryResult<User>;
     fn update_user(
         &self,
         user_id: i32,
