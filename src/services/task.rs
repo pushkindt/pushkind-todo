@@ -14,7 +14,6 @@ use crate::domain::{
     user::User,
 };
 use crate::forms::task::{NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskForm};
-use crate::models::task::status_to_db;
 use crate::repository::{
     TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
@@ -232,9 +231,11 @@ where
         })?;
 
     let status_event_data = (current_task.status != updated.status).then(|| {
+        let from_status: &'static str = current_task.status.into();
+        let to_status: &'static str = updated.status.into();
         json!({
-            "from": status_to_db(current_task.status),
-            "to": status_to_db(updated.status),
+            "from": from_status,
+            "to": to_status,
         })
     });
 

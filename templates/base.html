@@ -108,6 +108,86 @@
             }
         };
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" crossorigin="anonymous"></script>
+    <script>
+        (function () {
+            const EDITOR_SELECTOR = '[data-markdown-editor]';
+            const INPUT_SELECTOR = '[data-markdown-input]';
+            const OUTPUT_SELECTOR = '[data-markdown-output]';
+            const PREVIEW_CONTAINER_SELECTOR = '[data-markdown-preview]';
+            const PREVIEW_RENDER_SELECTOR = '[data-markdown-rendered]';
+
+            function findEditors(root) {
+                if (root && typeof root.matches === 'function' && root.matches(EDITOR_SELECTOR)) {
+                    return [root];
+                }
+
+                if (root && typeof root.querySelectorAll === 'function') {
+                    return Array.from(root.querySelectorAll(EDITOR_SELECTOR));
+                }
+
+                return Array.from(document.querySelectorAll(EDITOR_SELECTOR));
+            }
+
+            function initializeEditor(container) {
+                const editMessage = container.querySelector(INPUT_SELECTOR);
+                const messageSend = container.querySelector(OUTPUT_SELECTOR);
+                const renderMessage = container.querySelector(PREVIEW_RENDER_SELECTOR);
+
+                if (!editMessage || !messageSend || !renderMessage) {
+                    return;
+                }
+
+                const previewContainer = container.querySelector(PREVIEW_CONTAINER_SELECTOR);
+
+                const updateRenderedMessage = () => {
+                    const source = editMessage.value ?? '';
+
+                    if (typeof marked === 'undefined' || typeof marked.parse !== 'function') {
+                        renderMessage.textContent = source;
+                        messageSend.value = source;
+                        return;
+                    }
+
+                    const renderedMessage = marked.parse(source);
+                    renderMessage.innerHTML = renderedMessage;
+                    messageSend.value = renderedMessage;
+                };
+
+                if (container.dataset.markdownInitialized === 'true') {
+                    updateRenderedMessage();
+                    return;
+                }
+
+                editMessage.addEventListener('input', updateRenderedMessage);
+
+                container.dataset.markdownInitialized = 'true';
+                updateRenderedMessage();
+            }
+
+            function setupMarkdownEditor(root = document) {
+                const editors = findEditors(root);
+                editors.forEach(initializeEditor);
+            }
+
+            window.setupMarkdownEditor = setupMarkdownEditor;
+            window.MarkdownEditor = Object.assign({}, window.MarkdownEditor, {
+                setup: setupMarkdownEditor
+            });
+
+            document.addEventListener('DOMContentLoaded', () => {
+                setupMarkdownEditor(document);
+            });
+
+            document.addEventListener('htmx:afterSwap', (event) => {
+                setupMarkdownEditor(event.detail && event.detail.target ? event.detail.target : document);
+            });
+
+            document.addEventListener('htmx:afterSettle', (event) => {
+                setupMarkdownEditor(event.detail && event.detail.target ? event.detail.target : document);
+            });
+        })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 

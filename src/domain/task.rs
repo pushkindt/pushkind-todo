@@ -153,6 +153,31 @@ impl TaskAssignment {
     }
 }
 
+impl From<TaskStatus> for &'static str {
+    fn from(value: TaskStatus) -> Self {
+        match value {
+            TaskStatus::Pending => "Pending",
+            TaskStatus::InProgress => "InProgress",
+            TaskStatus::Blocked => "Blocked",
+            TaskStatus::Completed => "Completed",
+            TaskStatus::Archived => "Archived",
+        }
+    }
+}
+
+impl From<&str> for TaskStatus {
+    fn from(value: &str) -> Self {
+        match value {
+            "Pending" => TaskStatus::Pending,
+            "InProgress" => TaskStatus::InProgress,
+            "Blocked" => TaskStatus::Blocked,
+            "Completed" => TaskStatus::Completed,
+            "Archived" => TaskStatus::Archived,
+            _ => TaskStatus::Pending,
+        }
+    }
+}
+
 /// Filters applied when listing tasks.
 #[derive(Debug, Clone)]
 pub struct TaskListFilters {

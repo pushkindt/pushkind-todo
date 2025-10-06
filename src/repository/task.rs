@@ -4,7 +4,7 @@ use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 use crate::{
     domain::task::{
         NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
-        TaskListFilters, TaskStatus, UpdateTask as DomainUpdateTask,
+        TaskListFilters, UpdateTask as DomainUpdateTask,
     },
     models::task::{
         NewTask as DbNewTask, NewTaskAssignment as DbNewTaskAssignment, Task as DbTask,
@@ -47,7 +47,7 @@ impl TaskReader for DieselRepository {
             pagination,
         } = query;
 
-        let status_text = status.map(task_status_to_db);
+        let status_text = status.map(<&'static str>::from);
         let search_pattern = search.as_ref().and_then(|term| {
             let trimmed = term.trim();
             if trimmed.is_empty() {
@@ -256,15 +256,5 @@ impl TaskWriter for DieselRepository {
         }
 
         Ok(())
-    }
-}
-
-fn task_status_to_db(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Pending => "Pending",
-        TaskStatus::InProgress => "InProgress",
-        TaskStatus::Blocked => "Blocked",
-        TaskStatus::Completed => "Completed",
-        TaskStatus::Archived => "Archived",
     }
 }

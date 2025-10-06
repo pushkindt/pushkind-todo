@@ -84,3 +84,26 @@ impl NewTaskEvent {
         }
     }
 }
+
+impl From<TaskEventType> for &'static str {
+    fn from(value: TaskEventType) -> Self {
+        match value {
+            TaskEventType::Comment => "Comment",
+            TaskEventType::StatusChanged => "StatusChanged",
+            TaskEventType::AssignmentChanged => "AssignmentChanged",
+            TaskEventType::MetadataUpdated => "MetadataUpdated",
+        }
+    }
+}
+
+impl From<&str> for TaskEventType {
+    fn from(value: &str) -> Self {
+        match value {
+            "Comment" => TaskEventType::Comment,
+            "StatusChanged" => TaskEventType::StatusChanged,
+            "AssignmentChanged" => TaskEventType::AssignmentChanged,
+            "MetadataUpdated" => TaskEventType::MetadataUpdated,
+            _ => TaskEventType::MetadataUpdated,
+        }
+    }
+}

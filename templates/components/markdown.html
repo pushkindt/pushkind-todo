@@ -1,10 +1,12 @@
-<div class="row g-1">
+<div class="row g-1" data-markdown-editor>
     <div class="col">
-        <textarea autofocus class="form-control" rows=10 id="message-input" required
+        <textarea autofocus class="form-control" rows="10" data-markdown-input required
             placeholder="Содержание">{{message | default(value='') | safe}}</textarea>
-        <input type="hidden" id="message" name="message" required value="{{message | default(value='')}}">
+        <input type="hidden" name="message" required value="{{message | default(value='')}}"
+            data-markdown-output>
     </div>
-    <div class="col border rounded" id="message-rendered">
+    <div class="col border rounded" data-markdown-preview>
+        <div data-markdown-rendered></div>
     </div>
 </div>
 <div class="row mb-2">
@@ -17,40 +19,3 @@
         <small class="text-muted">Превью сообщения</small>
     </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script>
-
-    function setupMarkdownEditor(root = document) {
-        const editMessage = root.querySelector('#message-input');
-        if (!editMessage || editMessage.dataset.markdownInitialized === 'true') {
-            return;
-        }
-
-        const messageSend = root.querySelector('#message');
-        const renderMessage = root.querySelector('#message-rendered');
-        if (!messageSend || !renderMessage) {
-            return;
-        }
-
-        const updateRenderedMessage = () => {
-            const renderedMessage = marked.parse(editMessage.value);
-            renderMessage.innerHTML = renderedMessage;
-            messageSend.value = renderedMessage;
-        };
-
-        editMessage.addEventListener('input', updateRenderedMessage);
-        editMessage.dataset.markdownInitialized = 'true';
-
-        updateRenderedMessage();
-    }
-
-    setupMarkdownEditor();
-
-    document.addEventListener('htmx:afterSwap', (event) => {
-        setupMarkdownEditor(event.detail?.target ?? document);
-    });
-
-    document.addEventListener('htmx:afterSettle', (event) => {
-        setupMarkdownEditor(event.detail?.target ?? document);
-    });
-</script>
