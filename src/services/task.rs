@@ -456,175 +456,136 @@ mod tests {
         user::User,
     };
     use crate::forms::task::NewTaskCommentForm;
+    use crate::repository::mock::{
+        MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
+    };
     use crate::repository::{TaskListQuery, UserListQuery};
+    use mockall::Sequence;
 
-    #[derive(Default)]
-    struct StubRepo {
-        task: Option<Task>,
-        events: Vec<TaskEvent>,
-        hub_id: i32,
-        fail_with_error: bool,
-        delete_returns_not_found: bool,
-        users: HashMap<i32, User>,
+    struct TaskDetailsRepo {
+        pub task_reader: MockTaskReader,
+        pub event_reader: MockTaskEventReader,
+        pub user_reader: MockUserReader,
     }
 
-    impl StubRepo {
-        fn with_data(task: Task, events: Vec<TaskEvent>, hub_id: i32, users: Vec<User>) -> Self {
-            let users = users
-                .into_iter()
-                .map(|user| (user.id, user))
-                .collect::<HashMap<_, _>>();
-
+    impl TaskDetailsRepo {
+        fn new() -> Self {
             Self {
-                task: Some(task),
-                events,
-                hub_id,
-                fail_with_error: false,
-                delete_returns_not_found: false,
-                users,
+                task_reader: MockTaskReader::new(),
+                event_reader: MockTaskEventReader::new(),
+                user_reader: MockUserReader::new(),
             }
-        }
-
-        fn with_error() -> Self {
-            Self {
-                task: None,
-                events: Vec::new(),
-                hub_id: 1,
-                fail_with_error: true,
-                delete_returns_not_found: false,
-                users: HashMap::new(),
-            }
-        }
-
-        fn repo_error<T>(&self) -> RepositoryResult<T> {
-            Err(RepositoryError::Unexpected("boom".to_string()))
         }
     }
 
-    impl TaskReader for StubRepo {
-        fn get_task_by_id(&self, _: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            if hub_id != self.hub_id {
-                return Ok(None);
-            }
-
-            Ok(self.task.clone())
+    impl TaskReader for TaskDetailsRepo {
+        fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+            self.task_reader.get_task_by_id(id, hub_id)
         }
 
-        fn list_tasks(&self, _: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok((0, Vec::new()))
+        fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)> {
+            self.task_reader.list_tasks(query)
         }
 
         fn list_assignments_for_task(
             &self,
-            _: i32,
-            _: i32,
+            task_id: i32,
+            hub_id: i32,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(Vec::new())
+            self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
     }
 
-    impl TaskEventReader for StubRepo {
-        fn list_events_for_task(&self, _: i32, hub_id: i32) -> RepositoryResult<Vec<TaskEvent>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            if hub_id != self.hub_id {
-                return Ok(Vec::new());
-            }
-
-            Ok(self.events.clone())
+    impl TaskEventReader for TaskDetailsRepo {
+        fn list_events_for_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+        ) -> RepositoryResult<Vec<TaskEvent>> {
+            self.event_reader.list_events_for_task(task_id, hub_id)
         }
 
-        fn get_event_by_id(&self, _: i32, _: i32) -> RepositoryResult<Option<TaskEvent>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(None)
+        fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>> {
+            self.event_reader.get_event_by_id(id, hub_id)
         }
     }
 
-    impl UserReader for StubRepo {
+    impl UserReader for TaskDetailsRepo {
         fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(self
-                .users
-                .get(&id)
-                .cloned()
-                .filter(|user| user.hub_id == hub_id))
+            self.user_reader.get_user_by_id(id, hub_id)
         }
 
-        fn get_user_by_email(&self, _: &str, _: i32) -> RepositoryResult<Option<User>> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(None)
+        fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<User>> {
+            self.user_reader.get_user_by_email(email, hub_id)
         }
 
-        fn list_users(&self, _: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok((self.users.len(), self.users.values().cloned().collect()))
+        fn list_users(&self, query: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
+            self.user_reader.list_users(query)
         }
     }
 
-    impl TaskWriter for StubRepo {
-        fn create_task(&self, _: &DomainNewTask) -> RepositoryResult<Task> {
-            self.repo_error()
+    struct TaskDeleteRepo {
+        pub task_reader: MockTaskReader,
+        pub task_writer: MockTaskWriter,
+    }
+
+    impl TaskDeleteRepo {
+        fn new() -> Self {
+            Self {
+                task_reader: MockTaskReader::new(),
+                task_writer: MockTaskWriter::new(),
+            }
+        }
+    }
+
+    impl TaskReader for TaskDeleteRepo {
+        fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+            self.task_reader.get_task_by_id(id, hub_id)
         }
 
-        fn update_task(&self, _: i32, _: i32, _: &DomainUpdateTask) -> RepositoryResult<Task> {
-            self.repo_error()
+        fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)> {
+            self.task_reader.list_tasks(query)
+        }
+
+        fn list_assignments_for_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+        ) -> RepositoryResult<Vec<TaskAssignment>> {
+            self.task_reader.list_assignments_for_task(task_id, hub_id)
+        }
+    }
+
+    impl TaskWriter for TaskDeleteRepo {
+        fn create_task(&self, new_task: &DomainNewTask) -> RepositoryResult<Task> {
+            self.task_writer.create_task(new_task)
+        }
+
+        fn update_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+            updates: &DomainUpdateTask,
+        ) -> RepositoryResult<Task> {
+            self.task_writer.update_task(task_id, hub_id, updates)
         }
 
         fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            if self.delete_returns_not_found {
-                return Err(RepositoryError::NotFound);
-            }
-
-            match self.task {
-                Some(ref task) if task.id == task_id && task.hub_id == hub_id => Ok(()),
-                _ => Err(RepositoryError::NotFound),
-            }
+            self.task_writer.delete_task(task_id, hub_id)
         }
 
-        fn record_assignment(&self, _: &TaskAssignment) -> RepositoryResult<()> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(())
+        fn record_assignment(&self, assignment: &TaskAssignment) -> RepositoryResult<()> {
+            self.task_writer.record_assignment(assignment)
         }
 
-        fn remove_assignment(&self, _: i32, _: i32, _: i32) -> RepositoryResult<()> {
-            if self.fail_with_error {
-                return self.repo_error();
-            }
-
-            Ok(())
+        fn remove_assignment(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+            assignee_id: i32,
+        ) -> RepositoryResult<()> {
+            self.task_writer
+                .remove_assignment(task_id, hub_id, assignee_id)
         }
     }
 
@@ -693,13 +654,62 @@ mod tests {
         let task = sample_task(5, 1, Some(assignee.id), author.id);
         let event = sample_event(13, task.id, Some(author.id));
 
-        let repo = StubRepo::with_data(
-            task.clone(),
-            vec![event.clone()],
-            1,
-            vec![assignee.clone(), author.clone()],
-        );
+        let mut repo = TaskDetailsRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let hub_id = user.hub_id;
+
+        let task_for_return = task.clone();
+        repo.task_reader
+            .expect_get_task_by_id()
+            .return_once(move |id, hub| {
+                assert_eq!(id, task_for_return.id);
+                assert_eq!(hub, hub_id);
+                Ok(Some(task_for_return))
+            });
+
+        let event_for_return = event.clone();
+        repo.event_reader
+            .expect_list_events_for_task()
+            .return_once(move |task_id, hub| {
+                assert_eq!(task_id, event_for_return.task_id);
+                assert_eq!(hub, hub_id);
+                Ok(vec![event_for_return])
+            });
+
+        let mut sequence = Sequence::new();
+
+        let author_for_author_lookup = author.clone();
+        repo.user_reader
+            .expect_get_user_by_id()
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |id, hub| {
+                assert_eq!(id, author_for_author_lookup.id);
+                assert_eq!(hub, hub_id);
+                Ok(Some(author_for_author_lookup))
+            });
+
+        let assignee_for_lookup = assignee.clone();
+        repo.user_reader
+            .expect_get_user_by_id()
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |id, hub| {
+                assert_eq!(id, assignee_for_lookup.id);
+                assert_eq!(hub, hub_id);
+                Ok(Some(assignee_for_lookup))
+            });
+
+        let author_for_event_lookup = author.clone();
+        repo.user_reader
+            .expect_get_user_by_id()
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |id, hub| {
+                assert_eq!(id, author_for_event_lookup.id);
+                assert_eq!(hub, hub_id);
+                Ok(Some(author_for_event_lookup))
+            });
 
         let result = load_task_details(&repo, &user, task.id).expect("should load task");
 
@@ -717,7 +727,7 @@ mod tests {
 
     #[test]
     fn load_task_details_requires_role() {
-        let repo = StubRepo::default();
+        let repo = TaskDetailsRepo::new();
         let user = user_with_roles(&[]);
 
         let result = load_task_details(&repo, &user, 5);
@@ -727,14 +737,10 @@ mod tests {
 
     #[test]
     fn load_task_details_returns_not_found_for_missing_task() {
-        let repo = StubRepo {
-            task: None,
-            events: Vec::new(),
-            hub_id: 1,
-            fail_with_error: false,
-            delete_returns_not_found: false,
-            users: HashMap::new(),
-        };
+        let mut repo = TaskDetailsRepo::new();
+        repo.task_reader
+            .expect_get_task_by_id()
+            .return_once(|_, _| Ok(None));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = load_task_details(&repo, &user, 99);
@@ -744,7 +750,10 @@ mod tests {
 
     #[test]
     fn load_task_details_propagates_repository_error() {
-        let repo = StubRepo::with_error();
+        let mut repo = TaskDetailsRepo::new();
+        repo.task_reader
+            .expect_get_task_by_id()
+            .return_once(|_, _| Err(RepositoryError::Unexpected("boom".to_string())));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = load_task_details(&repo, &user, 1);
@@ -754,7 +763,7 @@ mod tests {
 
     #[test]
     fn delete_task_requires_role() {
-        let repo = StubRepo::with_data(sample_task(1, 1, None, 2), Vec::new(), 1, Vec::new());
+        let repo = TaskDeleteRepo::new();
         let user = user_with_roles(&[]);
 
         let result = delete_task(&repo, &user, 1);
@@ -764,7 +773,10 @@ mod tests {
 
     #[test]
     fn delete_task_returns_not_found_when_task_missing() {
-        let repo = StubRepo::default();
+        let mut repo = TaskDeleteRepo::new();
+        repo.task_reader
+            .expect_get_task_by_id()
+            .return_once(|_, _| Ok(None));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = delete_task(&repo, &user, 99);
@@ -774,14 +786,19 @@ mod tests {
 
     #[test]
     fn delete_task_returns_not_found_when_repository_reports_missing() {
-        let repo = StubRepo {
-            task: Some(sample_task(5, 1, None, 3)),
-            events: Vec::new(),
-            hub_id: 1,
-            fail_with_error: false,
-            delete_returns_not_found: true,
-            users: HashMap::new(),
-        };
+        let task = sample_task(5, 1, None, 3);
+        let mut repo = TaskDeleteRepo::new();
+        repo.task_reader.expect_get_task_by_id().return_once({
+            let task_clone = task.clone();
+            move |id, hub| {
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
+                Ok(Some(task_clone))
+            }
+        });
+        repo.task_writer
+            .expect_delete_task()
+            .return_once(|_, _| Err(RepositoryError::NotFound));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = delete_task(&repo, &user, 5);
@@ -791,7 +808,23 @@ mod tests {
 
     #[test]
     fn delete_task_returns_redirect_on_success() {
-        let repo = StubRepo::with_data(sample_task(7, 1, None, 4), Vec::new(), 1, Vec::new());
+        let task = sample_task(7, 1, None, 4);
+        let mut repo = TaskDeleteRepo::new();
+        repo.task_reader.expect_get_task_by_id().return_once({
+            let task_clone = task.clone();
+            move |id, hub| {
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
+                Ok(Some(task_clone))
+            }
+        });
+        repo.task_writer.expect_delete_task().return_once({
+            move |id, hub| {
+                assert_eq!(id, task.id);
+                assert_eq!(hub, task.hub_id);
+                Ok(())
+            }
+        });
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let outcome = delete_task(&repo, &user, 7).expect("should delete task");
@@ -802,7 +835,19 @@ mod tests {
 
     #[test]
     fn delete_task_propagates_repository_error() {
-        let repo = StubRepo::with_error();
+        let task = sample_task(1, 1, None, 2);
+        let mut repo = TaskDeleteRepo::new();
+        repo.task_reader.expect_get_task_by_id().return_once({
+            let task_clone = task.clone();
+            move |id, hub| {
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
+                Ok(Some(task_clone))
+            }
+        });
+        repo.task_writer
+            .expect_delete_task()
+            .return_once(|_, _| Err(RepositoryError::Unexpected("boom".to_string())));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let result = delete_task(&repo, &user, 1);
