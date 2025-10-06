@@ -9,7 +9,7 @@ use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::{
-    task::Task,
+    task::{Task, TaskStatus, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent, TaskEventType},
     user::User,
 };
@@ -203,7 +203,7 @@ where
 
     let TaskUpdateSubmission {
         task_id,
-        mut updates,
+        updates,
         assignee,
     } = submission;
 
@@ -212,16 +212,19 @@ where
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
-    match assignee {
+    let assignee_user = match assignee {
         Some(assignee) => {
             let new_user = assignee.into_new_user(user.hub_id);
-            let assignee = repo.create_or_update_user(&new_user)?;
-            if current_task.assigned_to != Some(assignee.id) {
-                updates = updates.assign_to(assignee.id);
-            }
+            Some(repo.create_or_update_user(&new_user)?)
         }
-        None => updates = updates.unassign(),
-    }
+        None => None,
+    };
+
+    let updates = apply_assignment_updates(
+        updates,
+        current_task.assigned_to,
+        assignee_user.as_ref().map(|user| user.id),
+    );
 
     let updated = repo
         .update_task(task_id, user.hub_id, &updates)
@@ -230,14 +233,7 @@ where
             other => ServiceError::from(other),
         })?;
 
-    let status_event_data = (current_task.status != updated.status).then(|| {
-        let from_status: &'static str = current_task.status.into();
-        let to_status: &'static str = updated.status.into();
-        json!({
-            "from": from_status,
-            "to": to_status,
-        })
-    });
+    let status_event_data = status_event_payload(current_task.status, updated.status);
 
     let assignment_event_data = if current_task.assigned_to != updated.assigned_to {
         let previous_assignee = match current_task.assigned_to {
@@ -254,65 +250,12 @@ where
             None => None,
         };
 
-        Some(json!({
-            "from": previous_assignee
-                .as_ref()
-                .map(assignment_event_user),
-            "to": new_assignee.as_ref().map(assignment_event_user),
-        }))
+        assignment_event_payload(previous_assignee.as_ref(), new_assignee.as_ref())
     } else {
         None
     };
 
-    let metadata_event_data = {
-        let mut changes = serde_json::Map::new();
-
-        if current_task.title != updated.title {
-            changes.insert(
-                "title".to_string(),
-                json!({
-                    "from": current_task.title.clone(),
-                    "to": updated.title.clone(),
-                }),
-            );
-        }
-
-        if current_task.description != updated.description {
-            changes.insert(
-                "description".to_string(),
-                json!({
-                    "from": current_task.description.clone(),
-                    "to": updated.description.clone(),
-                }),
-            );
-        }
-
-        if current_task.due_date != updated.due_date {
-            changes.insert(
-                "due_date".to_string(),
-                json!({
-                    "from": current_task.due_date.map(|date| date.to_string()),
-                    "to": updated.due_date.map(|date| date.to_string()),
-                }),
-            );
-        }
-
-        if current_task.completed_at != updated.completed_at {
-            changes.insert(
-                "completed_at".to_string(),
-                json!({
-                    "from": current_task.completed_at,
-                    "to": updated.completed_at,
-                }),
-            );
-        }
-
-        if changes.is_empty() {
-            None
-        } else {
-            Some(serde_json::Value::Object(changes))
-        }
-    };
+    let metadata_event_data = metadata_event_payload(&current_task, &updated);
 
     if status_event_data.is_some()
         || assignment_event_data.is_some()
@@ -356,6 +299,101 @@ where
         message: "Задача обновлена.".to_string(),
         redirect_to: format!("/task/{}", updated.id),
     })
+}
+
+fn apply_assignment_updates(
+    updates: UpdateTask,
+    current_assigned_to: Option<i32>,
+    new_assignee_id: Option<i32>,
+) -> UpdateTask {
+    match new_assignee_id {
+        Some(assignee_id) if current_assigned_to != Some(assignee_id) => {
+            updates.assign_to(assignee_id)
+        }
+        Some(_) => updates,
+        None if current_assigned_to.is_some() => updates.unassign(),
+        None => updates,
+    }
+}
+
+fn status_event_payload(current: TaskStatus, updated: TaskStatus) -> Option<Value> {
+    if current == updated {
+        None
+    } else {
+        let from_status: &'static str = current.into();
+        let to_status: &'static str = updated.into();
+        Some(json!({
+            "from": from_status,
+            "to": to_status,
+        }))
+    }
+}
+
+fn assignment_event_payload(
+    previous_assignee: Option<&User>,
+    new_assignee: Option<&User>,
+) -> Option<Value> {
+    let previous_id = previous_assignee.map(|user| user.id);
+    let new_id = new_assignee.map(|user| user.id);
+
+    if previous_id == new_id {
+        None
+    } else {
+        Some(json!({
+            "from": previous_assignee.map(assignment_event_user),
+            "to": new_assignee.map(assignment_event_user),
+        }))
+    }
+}
+
+fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
+    let mut changes = serde_json::Map::new();
+
+    if current.title != updated.title {
+        changes.insert(
+            "title".to_string(),
+            json!({
+                "from": current.title.clone(),
+                "to": updated.title.clone(),
+            }),
+        );
+    }
+
+    if current.description != updated.description {
+        changes.insert(
+            "description".to_string(),
+            json!({
+                "from": current.description.clone(),
+                "to": updated.description.clone(),
+            }),
+        );
+    }
+
+    if current.due_date != updated.due_date {
+        changes.insert(
+            "due_date".to_string(),
+            json!({
+                "from": current.due_date.map(|date| date.to_string()),
+                "to": updated.due_date.map(|date| date.to_string()),
+            }),
+        );
+    }
+
+    if current.completed_at != updated.completed_at {
+        changes.insert(
+            "completed_at".to_string(),
+            json!({
+                "from": current.completed_at,
+                "to": updated.completed_at,
+            }),
+        );
+    }
+
+    if changes.is_empty() {
+        None
+    } else {
+        Some(Value::Object(changes))
+    }
 }
 
 /// Record a new comment on the specified task from the current user.
@@ -645,6 +683,82 @@ mod tests {
             roles: roles.iter().map(|role| (*role).to_string()).collect(),
             exp: 0,
         }
+    }
+
+    #[test]
+    fn apply_assignment_updates_assigns_and_unassigns() {
+        let base = UpdateTask::new();
+        let assigned = apply_assignment_updates(base, Some(1), Some(2));
+        assert_eq!(assigned.assigned_to, Some(Some(2)));
+
+        let base = UpdateTask::new();
+        let unassigned = apply_assignment_updates(base, Some(1), None);
+        assert_eq!(unassigned.assigned_to, Some(None));
+
+        let unchanged = apply_assignment_updates(UpdateTask::new(), Some(3), Some(3));
+        assert_eq!(unchanged.assigned_to, None);
+    }
+
+    #[test]
+    fn status_event_payload_returns_changes() {
+        assert!(status_event_payload(TaskStatus::Pending, TaskStatus::Pending).is_none());
+
+        let payload = status_event_payload(TaskStatus::Pending, TaskStatus::Completed)
+            .expect("expected payload for status change");
+        assert_eq!(payload, json!({"from": "Pending", "to": "Completed"}));
+    }
+
+    #[test]
+    fn assignment_event_payload_includes_user_data() {
+        let previous = sample_user(5, 1, "Prev", "prev@example.com");
+        let next = sample_user(6, 1, "Next", "next@example.com");
+
+        let payload = assignment_event_payload(Some(&previous), Some(&next))
+            .expect("expected assignment change payload");
+
+        assert_eq!(
+            payload,
+            json!({
+                "from": {
+                    "id": previous.id,
+                    "name": previous.name,
+                    "email": previous.email,
+                },
+                "to": {
+                    "id": next.id,
+                    "name": next.name,
+                    "email": next.email,
+                }
+            })
+        );
+
+        assert!(assignment_event_payload(Some(&previous), Some(&previous)).is_none());
+    }
+
+    #[test]
+    fn metadata_event_payload_emits_differences() {
+        let current = sample_task(1, 1, None, 2);
+        let mut updated = current.clone();
+        updated.title = "Updated".to_string();
+        updated.description = Some("New".to_string());
+        updated.due_date = Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap());
+
+        let payload =
+            metadata_event_payload(&current, &updated).expect("expected metadata payload");
+
+        let expected = json!({
+            "title": {"from": current.title.clone(), "to": updated.title.clone()},
+            "description": {"from": current.description.clone(), "to": updated.description.clone()},
+            "due_date": {
+                "from": current.due_date.map(|date| date.to_string()),
+                "to": updated.due_date.map(|date| date.to_string())
+            }
+        });
+
+        assert_eq!(payload, expected);
+
+        let none_payload = metadata_event_payload(&current, &current);
+        assert!(none_payload.is_none());
     }
 
     #[test]
