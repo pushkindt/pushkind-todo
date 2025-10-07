@@ -72,12 +72,8 @@
             <h3 class="h6 mb-0">Добавить комментарий</h3>
         </div>
         <div class="card-body">
-            <form action="/task/{{ task.id }}/comments" method="POST" class="vstack gap-3">
-                <div>
-                    <label for="task-comment" class="form-label">Комментарий</label>
-                    <textarea class="form-control" id="task-comment" name="text" rows="4" required
-                        placeholder="Напишите комментарий к задаче"></textarea>
-                </div>
+            <form action="/task/{{ task.id }}/comments" method="POST" class="vstack">
+                {{ macros::markdown(id=1) }}
                 <div class="d-flex justify-content-end gap-2">
                     <button type="submit" class="btn btn-primary">Отправить</button>
                 </div>

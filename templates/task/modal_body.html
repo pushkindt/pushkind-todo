@@ -1,3 +1,5 @@
+{% import "components/macros.html" as macros %}
+
 <form action="/task/{{ task.id }}/update" method="POST">
 
     <div class="row mb-3">
@@ -8,8 +10,7 @@
         </div>
     </div>
 
-    {% set message = task.description%}
-    {% include 'components/markdown.html' %}
+    {{ macros::markdown(id=0, message=task.description) }}
 
     <div class="row mb-3">
         <label for="modifyTaskDueDate" class="col-md-2 col-form-label">Срок</label>

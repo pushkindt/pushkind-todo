@@ -1445,7 +1445,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = NewTaskCommentForm {
-            text: "Новый комментарий".to_string(),
+            message: "Новый комментарий".to_string(),
         };
 
         let outcome = add_task_comment(&repo, &user, task.id, form).expect("should add comment");
@@ -1476,7 +1476,7 @@ mod tests {
         };
 
         let form = NewTaskCommentForm {
-            text: "Комментарий".to_string(),
+            message: "Комментарий".to_string(),
         };
 
         add_task_comment(&repo, &user, task.id, form).expect("should add comment");
@@ -1499,7 +1499,7 @@ mod tests {
         let user = user_with_roles(&[]);
 
         let form = NewTaskCommentForm {
-            text: "Комментарий".to_string(),
+            message: "Комментарий".to_string(),
         };
 
         let result = add_task_comment(&repo, &user, 91, form);
@@ -1514,7 +1514,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = NewTaskCommentForm {
-            text: String::new(),
+            message: String::new(),
         };
 
         let result = add_task_comment(&repo, &user, 93, form);
@@ -1529,7 +1529,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = NewTaskCommentForm {
-            text: "Комментарий".to_string(),
+            message: "Комментарий".to_string(),
         };
 
         let result = add_task_comment(&repo, &user, 123, form);
