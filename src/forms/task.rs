@@ -35,13 +35,15 @@ pub struct NewTaskCommentForm {
     /// Free-form comment body written by the user.
     #[validate(length(min = 1))]
     #[serde(deserialize_with = "deserialize_trimmed_string")]
-    pub text: String,
+    pub message: String,
 }
 
 impl NewTaskCommentForm {
     /// Normalize the submitted comment text by trimming surrounding whitespace.
     pub fn into_submission(self) -> TaskCommentSubmission {
-        TaskCommentSubmission { text: self.text }
+        TaskCommentSubmission {
+            text: ammonia::clean(&self.message),
+        }
     }
 }
 
