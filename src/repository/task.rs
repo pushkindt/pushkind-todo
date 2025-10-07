@@ -101,7 +101,7 @@ impl TaskReader for DieselRepository {
         }
 
         let db_tasks = items
-            .order(tasks::created_at.desc())
+            .order(tasks::updated_at.desc())
             .select(DbTask::as_select())
             .load::<DbTask>(&mut conn)?;
 

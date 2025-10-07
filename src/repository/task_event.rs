@@ -64,17 +64,32 @@ impl TaskEventReader for DieselRepository {
 
 impl TaskEventWriter for DieselRepository {
     fn record_event(&self, event: &DomainNewTaskEvent) -> RepositoryResult<DomainTaskEvent> {
-        use crate::schema::task_events;
+        use crate::schema::{task_events, tasks};
 
         let mut conn = self.conn()?;
         let db_new = DbNewTaskEvent::try_from(event).map_err(model_error_as_validation)?;
 
-        let inserted = diesel::insert_into(task_events::table)
-            .values(&db_new)
-            .returning(DbTaskEvent::as_returning())
-            .get_result::<DbTaskEvent>(&mut conn)?;
+        conn.transaction::<DomainTaskEvent, RepositoryError, _>(|conn| {
+            let inserted = diesel::insert_into(task_events::table)
+                .values(&db_new)
+                .returning(DbTaskEvent::as_returning())
+                .get_result::<DbTaskEvent>(conn)?;
 
-        inserted.try_into().map_err(model_error_as_unexpected)
+            let task_id = inserted.task_id;
+            let event_created_at = inserted.created_at;
+
+            let updated = diesel::update(tasks::table.filter(tasks::id.eq(task_id)))
+                .set(tasks::updated_at.eq(event_created_at))
+                .execute(conn)?;
+
+            if updated == 0 {
+                return Err(RepositoryError::Unexpected(
+                    "Recorded task event but failed to update task timestamp".to_string(),
+                ));
+            }
+
+            inserted.try_into().map_err(model_error_as_unexpected)
+        })
     }
 
     fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()> {
