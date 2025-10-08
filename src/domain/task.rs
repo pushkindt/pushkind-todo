@@ -193,6 +193,10 @@ pub struct TaskListFilters {
     pub due_before: Option<NaiveDate>,
     /// Only return tasks due on or after this date.
     pub due_after: Option<NaiveDate>,
+    /// Only return tasks updated on or before this timestamp.
+    pub updated_before: Option<NaiveDateTime>,
+    /// Only return tasks updated on or after this timestamp.
+    pub updated_after: Option<NaiveDateTime>,
 }
 
 impl TaskListFilters {
@@ -205,6 +209,8 @@ impl TaskListFilters {
             search: None,
             due_before: None,
             due_after: None,
+            updated_before: None,
+            updated_after: None,
         }
     }
 
@@ -235,6 +241,18 @@ impl TaskListFilters {
     /// Only return tasks due on or after the provided date.
     pub fn due_after(mut self, date: NaiveDate) -> Self {
         self.due_after = Some(date);
+        self
+    }
+
+    /// Only return tasks updated on or before the provided timestamp.
+    pub fn updated_before(mut self, timestamp: NaiveDateTime) -> Self {
+        self.updated_before = Some(timestamp);
+        self
+    }
+
+    /// Only return tasks updated on or after the provided timestamp.
+    pub fn updated_after(mut self, timestamp: NaiveDateTime) -> Self {
+        self.updated_after = Some(timestamp);
         self
     }
 }

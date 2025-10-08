@@ -31,10 +31,10 @@ pub async fn show_index(
             context.insert("tasks", &data.tasks);
             context.insert("templates", &data.tasks); // temporary alias while templates migrate
             context.insert("search", &data.search);
-            context.insert(
-                "recently_updated_task_ids",
-                &data.recently_updated_task_ids,
-            );
+            context.insert("status_filter", &data.status);
+            context.insert("updated_after", &data.updated_after);
+            context.insert("updated_before", &data.updated_before);
+            context.insert("recently_updated_task_ids", &data.recently_updated_task_ids);
             render_template(&tera, "main/index.html", &context)
         }
         Err(ServiceError::Unauthorized) => {

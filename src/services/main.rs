@@ -1,3 +1,4 @@
+use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::check_role;
@@ -5,7 +6,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::task::Task;
+use crate::domain::task::{Task, TaskStatus};
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
@@ -17,6 +18,12 @@ pub struct IndexQuery {
     pub search: Option<String>,
     /// Page number requested by the user interface.
     pub page: Option<usize>,
+    /// Optional status filter provided by the user.
+    pub status: Option<String>,
+    /// Only return tasks updated on or after this date (YYYY-MM-DD).
+    pub updated_after: Option<String>,
+    /// Only return tasks updated on or before this date (YYYY-MM-DD).
+    pub updated_before: Option<String>,
 }
 
 /// Data required to render the main index tasks page.
@@ -25,6 +32,12 @@ pub struct IndexPageData {
     pub tasks: Paginated<Task>,
     /// Search query echoed back to the template when present.
     pub search: Option<String>,
+    /// Status filter echoed back to the template when present.
+    pub status: Option<String>,
+    /// Updated-after filter echoed back to the template when present.
+    pub updated_after: Option<String>,
+    /// Updated-before filter echoed back to the template when present.
+    pub updated_before: Option<String>,
     /// Task identifiers that were updated after the user's last visit.
     pub recently_updated_task_ids: Vec<i32>,
 }
@@ -44,6 +57,28 @@ where
 
     let page = query.page.unwrap_or(1);
     let mut list_query = TaskListQuery::new(user.hub_id).paginate(page, DEFAULT_ITEMS_PER_PAGE);
+
+    let mut status_filter_text = None;
+    if let Some(status_value) = query.status.as_deref().and_then(parse_status_filter) {
+        list_query.filters_mut().status = Some(status_value);
+        status_filter_text = Some((<&str>::from(status_value)).to_string());
+    }
+
+    let mut updated_after_text = None;
+    if let Some(updated_after_value) = query.updated_after.as_deref().and_then(parse_date_filter)
+        && let Some(timestamp) = start_of_day(updated_after_value)
+    {
+        list_query.filters_mut().updated_after = Some(timestamp);
+        updated_after_text = Some(updated_after_value.format("%Y-%m-%d").to_string());
+    }
+
+    let mut updated_before_text = None;
+    if let Some(updated_before_value) = query.updated_before.as_deref().and_then(parse_date_filter)
+        && let Some(timestamp) = end_of_day(updated_before_value)
+    {
+        list_query.filters_mut().updated_before = Some(timestamp);
+        updated_before_text = Some(updated_before_value.format("%Y-%m-%d").to_string());
+    }
 
     if let Some(value) = query.search.as_ref()
         && !value.trim().is_empty()
@@ -73,8 +108,45 @@ where
     Ok(IndexPageData {
         tasks,
         search: query.search,
+        status: status_filter_text,
+        updated_after: updated_after_text,
+        updated_before: updated_before_text,
         recently_updated_task_ids,
     })
+}
+
+fn parse_status_filter(input: &str) -> Option<TaskStatus> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    match trimmed {
+        "Pending" => Some(TaskStatus::Pending),
+        "InProgress" => Some(TaskStatus::InProgress),
+        "Blocked" => Some(TaskStatus::Blocked),
+        "Completed" => Some(TaskStatus::Completed),
+        "Archived" => Some(TaskStatus::Archived),
+        _ => None,
+    }
+}
+
+fn parse_date_filter(input: &str) -> Option<NaiveDate> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok()
+}
+
+fn start_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
+    date.and_hms_opt(0, 0, 0)
+}
+
+fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
+    date.and_hms_micro_opt(23, 59, 59, 999_999)
+        .or_else(|| date.and_hms_opt(23, 59, 59))
 }
 
 /// Validates the add-task form and persists a new task record.
@@ -251,7 +323,8 @@ mod tests {
             &self,
             task_id: i32,
             hub_id: i32,
-        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<DomainTaskAssignment>> {
+        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<DomainTaskAssignment>>
+        {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
     }
@@ -436,6 +509,7 @@ mod tests {
         let query = IndexQuery {
             search: Some("alp".to_string()),
             page: Some(2),
+            ..Default::default()
         };
 
         let expected_hub = user.hub_id;
@@ -519,12 +593,79 @@ mod tests {
     }
 
     #[test]
+    fn load_index_page_applies_filters_to_query() {
+        let mut repo = TaskReaderUserRepo::new();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let query = IndexQuery {
+            search: Some("project".to_string()),
+            page: Some(1),
+            status: Some("Completed".to_string()),
+            updated_after: Some("2024-05-01".to_string()),
+            updated_before: Some("2024-05-31".to_string()),
+        };
+
+        let expected_email = user.email.clone();
+        let expected_hub_id = user.hub_id;
+        let expected_user = sample_user_record(7, expected_hub_id, &expected_email, "Tester");
+
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub_id| {
+                assert_eq!(email, expected_email.as_str());
+                assert_eq!(hub_id, expected_hub_id);
+                Ok(Some(expected_user.clone()))
+            });
+
+        let expected_after_date =
+            NaiveDate::from_ymd_opt(2024, 5, 1).expect("valid after date provided");
+        let expected_before_date =
+            NaiveDate::from_ymd_opt(2024, 5, 31).expect("valid before date provided");
+        let expected_after_ts =
+            start_of_day(expected_after_date).expect("start of day should be available");
+        let expected_before_ts =
+            end_of_day(expected_before_date).expect("end of day should be available");
+
+        repo.task_reader
+            .expect_list_tasks()
+            .times(1)
+            .returning(move |query| {
+                let TaskListQuery {
+                    filters,
+                    pagination,
+                } = query;
+
+                assert_eq!(filters.hub_id, expected_hub_id);
+                assert_eq!(filters.search.as_deref(), Some("project"));
+                assert_eq!(filters.status, Some(TaskStatus::Completed));
+                assert_eq!(filters.updated_after, Some(expected_after_ts));
+                assert_eq!(filters.updated_before, Some(expected_before_ts));
+
+                match pagination {
+                    Some(pagination) => {
+                        assert_eq!(pagination.page, 1);
+                        assert_eq!(pagination.per_page, DEFAULT_ITEMS_PER_PAGE);
+                    }
+                    None => panic!("expected pagination to be provided"),
+                }
+
+                Ok((0, Vec::new()))
+            });
+
+        let result = load_index_page(&repo, &user, query).expect("expected success");
+        assert_eq!(result.status.as_deref(), Some("Completed"));
+        assert_eq!(result.updated_after.as_deref(), Some("2024-05-01"));
+        assert_eq!(result.updated_before.as_deref(), Some("2024-05-31"));
+    }
+
+    #[test]
     fn load_index_page_marks_recently_updated_tasks() {
         let mut repo = TaskReaderUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let query = IndexQuery {
             search: None,
             page: None,
+            ..Default::default()
         };
 
         let visited_at = fixed_datetime();
@@ -545,21 +686,18 @@ mod tests {
         let fresh_task_id = 2;
         let hub_id_for_tasks = user.hub_id;
 
-        repo.task_reader
-            .expect_list_tasks()
-            .times(1)
-            .returning({
-                let visited_at_for_tasks = visited_at;
-                move |_| {
-                    let mut stale_task = sample_task(1, hub_id_for_tasks, "stale");
-                    stale_task.updated_at = visited_at_for_tasks;
+        repo.task_reader.expect_list_tasks().times(1).returning({
+            let visited_at_for_tasks = visited_at;
+            move |_| {
+                let mut stale_task = sample_task(1, hub_id_for_tasks, "stale");
+                stale_task.updated_at = visited_at_for_tasks;
 
-                    let mut fresh_task = sample_task(fresh_task_id, hub_id_for_tasks, "fresh");
-                    fresh_task.updated_at = visited_at_for_tasks + Duration::hours(1);
+                let mut fresh_task = sample_task(fresh_task_id, hub_id_for_tasks, "fresh");
+                fresh_task.updated_at = visited_at_for_tasks + Duration::hours(1);
 
-                    Ok((2, vec![stale_task, fresh_task]))
-                }
-            });
+                Ok((2, vec![stale_task, fresh_task]))
+            }
+        });
 
         let result = load_index_page(&repo, &user, query).expect("expected success");
 
