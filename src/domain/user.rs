@@ -12,6 +12,8 @@ pub struct User {
     pub name: String,
     /// Primary email address used for authentication and notifications.
     pub email: String,
+    /// Timestamp of last activity by the user.
+    pub visited_at: Option<chrono::NaiveDateTime>,
 }
 
 /// Parameters required to create a new user.

@@ -25,6 +25,8 @@ pub struct IndexPageData {
     pub tasks: Paginated<Task>,
     /// Search query echoed back to the template when present.
     pub search: Option<String>,
+    /// Task identifiers that were updated after the user's last visit.
+    pub recently_updated_task_ids: Vec<i32>,
 }
 
 /// Loads the tasks list for the main index page.
@@ -34,7 +36,7 @@ pub fn load_index_page<R>(
     query: IndexQuery,
 ) -> ServiceResult<IndexPageData>
 where
-    R: TaskReader + ?Sized,
+    R: TaskReader + UserReader + ?Sized,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
@@ -49,7 +51,21 @@ where
         list_query.filters_mut().search = Some(value.clone());
     }
 
+    let visited_at = repo
+        .get_user_by_email(&user.email, user.hub_id)
+        .map_err(ServiceError::from)?
+        .and_then(|record| record.visited_at);
     let (total, tasks) = repo.list_tasks(list_query).map_err(ServiceError::from)?;
+
+    let recently_updated_task_ids = visited_at
+        .map(|visited| {
+            tasks
+                .iter()
+                .filter(|task| task.updated_at > visited)
+                .map(|task| task.id)
+                .collect()
+        })
+        .unwrap_or_default();
 
     let total_pages = total.div_ceil(DEFAULT_ITEMS_PER_PAGE);
     let tasks = Paginated::new(tasks, page, total_pages);
@@ -57,6 +73,7 @@ where
     Ok(IndexPageData {
         tasks,
         search: query.search,
+        recently_updated_task_ids,
     })
 }
 
@@ -80,6 +97,7 @@ where
 
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     let new_task = match form.into_new_task(user.hub_id, author.id) {
         Some(task) => task,
@@ -115,6 +133,7 @@ where
 
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
@@ -138,7 +157,7 @@ where
 mod tests {
     use super::*;
     use actix_multipart::form::tempfile::TempFile;
-    use chrono::{NaiveDate, NaiveDateTime};
+    use chrono::{Duration, NaiveDate, NaiveDateTime};
     use pushkind_common::repository::errors::RepositoryError;
     use serde_json::Value;
     use tempfile::NamedTempFile;
@@ -194,6 +213,71 @@ mod tests {
             hub_id,
             name: name.to_string(),
             email: email.to_string(),
+            visited_at: Some(fixed_datetime()),
+        }
+    }
+
+    struct TaskReaderUserRepo {
+        pub task_reader: MockTaskReader,
+        pub user_reader: MockUserReader,
+    }
+
+    impl TaskReaderUserRepo {
+        fn new() -> Self {
+            Self {
+                task_reader: MockTaskReader::new(),
+                user_reader: MockUserReader::new(),
+            }
+        }
+    }
+
+    impl TaskReader for TaskReaderUserRepo {
+        fn get_task_by_id(
+            &self,
+            id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<Task>> {
+            self.task_reader.get_task_by_id(id, hub_id)
+        }
+
+        fn list_tasks(
+            &self,
+            query: TaskListQuery,
+        ) -> pushkind_common::repository::errors::RepositoryResult<(usize, Vec<Task>)> {
+            self.task_reader.list_tasks(query)
+        }
+
+        fn list_assignments_for_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<DomainTaskAssignment>> {
+            self.task_reader.list_assignments_for_task(task_id, hub_id)
+        }
+    }
+
+    impl UserReader for TaskReaderUserRepo {
+        fn get_user_by_id(
+            &self,
+            id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
+            self.user_reader.get_user_by_id(id, hub_id)
+        }
+
+        fn get_user_by_email(
+            &self,
+            email: &str,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
+            self.user_reader.get_user_by_email(email, hub_id)
+        }
+
+        fn list_users(
+            &self,
+            query: UserListQuery,
+        ) -> pushkind_common::repository::errors::RepositoryResult<(usize, Vec<User>)> {
+            self.user_reader.list_users(query)
         }
     }
 
@@ -305,6 +389,14 @@ mod tests {
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.delete_user(user_id, hub_id)
         }
+
+        fn touch_visited_at(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.user_writer.touch_visited_at(user_id, hub_id)
+        }
     }
 
     fn upload_form(contents: &str) -> UploadTasksForm {
@@ -329,7 +421,7 @@ mod tests {
 
     #[test]
     fn load_index_page_returns_unauthorized_when_role_missing() {
-        let repo = MockTaskReader::new();
+        let repo = TaskReaderUserRepo::new();
         let user = user_with_roles(&[]);
 
         let result = load_index_page(&repo, &user, IndexQuery::default());
@@ -339,7 +431,7 @@ mod tests {
 
     #[test]
     fn load_index_page_returns_paginated_data() {
-        let mut repo = MockTaskReader::new();
+        let mut repo = TaskReaderUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let query = IndexQuery {
             search: Some("alp".to_string()),
@@ -350,7 +442,21 @@ mod tests {
         let hub_for_assert = expected_hub;
         let hub_for_return = expected_hub;
 
-        repo.expect_list_tasks()
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning({
+                let expected_email = user.email.clone();
+                let expected_hub_id = user.hub_id;
+                move |email, hub_id| {
+                    assert_eq!(email, expected_email.as_str());
+                    assert_eq!(hub_id, expected_hub_id);
+                    Ok(Some(sample_user_record(5, hub_id, email, "Tester")))
+                }
+            });
+
+        repo.task_reader
+            .expect_list_tasks()
             .times(1)
             .withf(move |query| {
                 assert_eq!(query.filters.hub_id, hub_for_assert);
@@ -382,6 +488,7 @@ mod tests {
         };
 
         assert_eq!(data.search.as_deref(), Some("alp"));
+        assert!(data.recently_updated_task_ids.is_empty());
 
         let serialized = match serde_json::to_value(&data.tasks) {
             Ok(value) => value,
@@ -409,6 +516,54 @@ mod tests {
             .and_then(|map| map.get("title"))
             .and_then(Value::as_str);
         assert_eq!(first_title, Some("alpha"));
+    }
+
+    #[test]
+    fn load_index_page_marks_recently_updated_tasks() {
+        let mut repo = TaskReaderUserRepo::new();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let query = IndexQuery {
+            search: None,
+            page: None,
+        };
+
+        let visited_at = fixed_datetime();
+        let expected_email = user.email.clone();
+        let expected_hub_id = user.hub_id;
+        let expected_name = user.name.clone();
+        let user_record = sample_user_record(42, expected_hub_id, &expected_email, &expected_name);
+
+        repo.user_reader
+            .expect_get_user_by_email()
+            .times(1)
+            .returning(move |email, hub_id| {
+                assert_eq!(email, expected_email.as_str());
+                assert_eq!(hub_id, expected_hub_id);
+                Ok(Some(user_record.clone()))
+            });
+
+        let fresh_task_id = 2;
+        let hub_id_for_tasks = user.hub_id;
+
+        repo.task_reader
+            .expect_list_tasks()
+            .times(1)
+            .returning({
+                let visited_at_for_tasks = visited_at;
+                move |_| {
+                    let mut stale_task = sample_task(1, hub_id_for_tasks, "stale");
+                    stale_task.updated_at = visited_at_for_tasks;
+
+                    let mut fresh_task = sample_task(fresh_task_id, hub_id_for_tasks, "fresh");
+                    fresh_task.updated_at = visited_at_for_tasks + Duration::hours(1);
+
+                    Ok((2, vec![stale_task, fresh_task]))
+                }
+            });
+
+        let result = load_index_page(&repo, &user, query).expect("expected success");
+
+        assert_eq!(result.recently_updated_task_ids, vec![fresh_task_id]);
     }
 
     #[test]
@@ -476,6 +631,15 @@ mod tests {
                 Ok(author_for_create.clone())
             });
 
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
+            });
+
         repo.task_writer
             .expect_create_task()
             .times(1)
@@ -534,6 +698,15 @@ mod tests {
                 Ok(created_author_for_create.clone())
             });
 
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
+            });
+
         repo.task_writer
             .expect_create_task()
             .times(1)
@@ -578,6 +751,15 @@ mod tests {
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
             });
 
         repo.task_writer
@@ -646,6 +828,15 @@ foo,bar
                 Ok(author_for_create.clone())
             });
 
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, author.id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
+            });
+
         repo.task_writer.expect_create_task().never();
 
         let result = upload_tasks(&repo, &user, &mut form);
@@ -692,6 +883,15 @@ beta,
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
             });
 
         repo.task_writer
@@ -766,6 +966,15 @@ alpha,
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(created_author_for_create.clone())
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
             });
 
         repo.task_writer

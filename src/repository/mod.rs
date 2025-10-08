@@ -114,6 +114,7 @@ pub trait UserWriter {
         updates: &UpdateUser,
     ) -> RepositoryResult<User>;
     fn delete_user(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()>;
+    fn touch_visited_at(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()>;
 }
 
 /// Read-only operations over task records.

@@ -144,4 +144,20 @@ impl UserWriter for DieselRepository {
 
         Ok(())
     }
+
+    fn touch_visited_at(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()> {
+        use crate::schema::users;
+
+        let mut conn = self.conn()?;
+
+        let target = users::table
+            .filter(users::id.eq(user_id))
+            .filter(users::hub_id.eq(hub_id));
+
+        diesel::update(target)
+            .set(users::visited_at.eq(diesel::dsl::now))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
 }
