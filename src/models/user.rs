@@ -14,6 +14,7 @@ pub struct User {
     pub email: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub visited_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Insertable)]
@@ -38,6 +39,7 @@ impl From<User> for DomainUser {
             hub_id: value.hub_id,
             name: value.name,
             email: value.email,
+            visited_at: value.visited_at,
         }
     }
 }

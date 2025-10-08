@@ -45,6 +45,7 @@ diesel::table! {
         email -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        visited_at -> Nullable<Timestamp>,
     }
 }
 

@@ -263,6 +263,7 @@ where
     {
         let new_user = user.into();
         let actor = repo.create_or_update_user(&new_user)?;
+        repo.touch_visited_at(actor.id, actor.hub_id)?;
 
         if let Some(data) = status_event_data {
             let event = NewTaskEvent::new(
@@ -422,6 +423,7 @@ where
     let submission = form.into_submission();
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     let event = NewTaskEvent::new(
         task_id,
@@ -671,6 +673,7 @@ mod tests {
             hub_id,
             name: name.to_string(),
             email: email.to_string(),
+            visited_at: Some(fixed_datetime()),
         }
     }
 
@@ -1129,6 +1132,7 @@ mod tests {
                 hub_id: new_user.hub_id,
                 name: new_user.name.clone(),
                 email: new_user.email.clone(),
+                visited_at: Some(fixed_datetime()),
             };
 
             self.users
@@ -1149,6 +1153,10 @@ mod tests {
 
         fn delete_user(&self, _: i32, _: i32) -> RepositoryResult<()> {
             Err(RepositoryError::NotFound)
+        }
+
+        fn touch_visited_at(&self, _: i32, _: i32) -> RepositoryResult<()> {
+            Ok(())
         }
     }
 
