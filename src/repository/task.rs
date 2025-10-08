@@ -43,6 +43,8 @@ impl TaskReader for DieselRepository {
                     search,
                     due_before,
                     due_after,
+                    updated_before,
+                    updated_after,
                 },
             pagination,
         } = query;
@@ -76,6 +78,14 @@ impl TaskReader for DieselRepository {
 
             if let Some(due_after) = due_after {
                 items = items.filter(tasks::due_date.ge(due_after));
+            }
+
+            if let Some(updated_before) = updated_before {
+                items = items.filter(tasks::updated_at.le(updated_before));
+            }
+
+            if let Some(updated_after) = updated_after {
+                items = items.filter(tasks::updated_at.ge(updated_after));
             }
 
             if let Some(pattern) = search_pattern.as_deref() {
