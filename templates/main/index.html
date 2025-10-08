@@ -58,6 +58,9 @@
         <div class="row my-1 py-1 border-top selectable {% if task.id in recently_updated_task_ids %}task-recent{% endif %}" data-id="{{ task.id }}">
             <div class="col-sm-2">
                 <strong>{{ task.id }}</strong>
+                <div class="text-muted small">
+                    <i class="bi bi-clock-history" aria-hidden="true"></i> {{ task.updated_at | date(format="%Y-%m-%d %H:%M") }}
+                </div>
             </div>
             <div class="col-sm">
                 <span class="d-sm-none fw-bold">Название:</span>
