@@ -72,15 +72,32 @@
     </div>
 {% endmacro task_description %}
 
-{% macro pagination(pages, current_page=1, search_query="") %}
+{% macro pagination(pages, current_page=1, search="", status="", updated_after="", updated_before="") %}
     {% if pages | length > 1 %}
+        {% set query_suffix = "" %}
+        {% if search %}
+            {% set encoded_search = search | urlencode %}
+            {% set query_suffix = query_suffix ~ "&search=" ~ encoded_search %}
+        {% endif %}
+        {% if status %}
+            {% set encoded_status = status | urlencode %}
+            {% set query_suffix = query_suffix ~ "&status=" ~ encoded_status %}
+        {% endif %}
+        {% if updated_after %}
+            {% set encoded_after = updated_after | urlencode %}
+            {% set query_suffix = query_suffix ~ "&updated_after=" ~ encoded_after %}
+        {% endif %}
+        {% if updated_before %}
+            {% set encoded_before = updated_before | urlencode %}
+            {% set query_suffix = query_suffix ~ "&updated_before=" ~ encoded_before %}
+        {% endif %}
         <nav aria-label="pagination">
             <ul class="pagination justify-content-center flex-wrap" id="pagination">
                 {% for page in pages %}
                     {% if page %}
                         {% if page != current_page %}
                             <li class="page-item">
-                            <a class="page-link" href="?page={{page}}{% if search_query %}&q={{search_query}}{% endif %}">
+                                <a class="page-link" href="?page={{page}}{{ query_suffix }}">
                                     {{ page }}
                                 </a>
                             </li>

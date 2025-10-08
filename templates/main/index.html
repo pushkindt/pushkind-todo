@@ -89,7 +89,14 @@
         {% endfor %}
     </div>
 
-    {{ macros::pagination(pages=tasks.pages) }}
+    {{ macros::pagination(
+        pages=tasks.pages,
+        current_page=tasks.page,
+        search=search | default(value=""),
+        status=status_filter | default(value=""),
+        updated_after=updated_after | default(value=""),
+        updated_before=updated_before | default(value="")
+    ) }}
 </div>
 
 <div class="modal fade" id="filtersModal" tabindex="-1" aria-labelledby="filtersModalLabel" aria-hidden="true">
