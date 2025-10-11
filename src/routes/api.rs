@@ -5,11 +5,11 @@ use crate::repository::DieselRepository;
 use crate::services::main::IndexQuery;
 use crate::services::{ServiceError, main as main_service};
 
-#[get("/v1/templates")]
+#[get("/v1/tasks")]
 /// Return a JSON list of tasks with optional search and pagination.
 ///
 /// Users without the role stored in `crate::SERVICE_ACCESS_ROLE` receive a `401 Unauthorized` response.
-pub async fn api_v1_templates(
+pub async fn api_v1_tasks(
     params: web::Query<IndexQuery>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
