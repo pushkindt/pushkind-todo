@@ -41,10 +41,10 @@ jobs:
           if_key_exists: fail # replace / ignore / fail; optional (defaults to fail)
       - name: Deploy
         run: |
-          ssh cicd@todo.pushkind.com "supervisorctl stop todo"
+          ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl stop pushkind-todo.service"
           scp ./target/release/pushkind-todo cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./assets/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./templates/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./migrations/ cicd@todo.pushkind.com:/var/www10/html/
           ssh cicd@todo.pushkind.com "cd /var/www10/html/ && /home/cicd/.cargo/bin/diesel migration run"
-          ssh cicd@todo.pushkind.com "supervisorctl start todo"
+          ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl start pushkind-todo.service"

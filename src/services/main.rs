@@ -49,7 +49,7 @@ pub fn load_index_page<R>(
     query: IndexQuery,
 ) -> ServiceResult<IndexPageData>
 where
-    R: TaskReader + UserReader + ?Sized,
+    R: TaskReader + UserReader + UserWriter + ?Sized,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
@@ -86,10 +86,12 @@ where
         list_query.filters_mut().search = Some(value.clone());
     }
 
-    let visited_at = repo
-        .get_user_by_email(&user.email, user.hub_id)
-        .map_err(ServiceError::from)?
-        .and_then(|record| record.visited_at);
+    let new_user = user.into();
+    let user = repo.create_or_update_user(&new_user)?;
+    let visited_at = user.visited_at;
+
+    repo.touch_visited_at(user.id, user.hub_id)?;
+
     let (total, tasks) = repo.list_tasks(list_query).map_err(ServiceError::from)?;
 
     let recently_updated_task_ids = visited_at
@@ -169,7 +171,6 @@ where
 
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
-    repo.touch_visited_at(author.id, author.hub_id)?;
 
     let new_task = match form.into_new_task(user.hub_id, author.id) {
         Some(task) => task,
@@ -183,6 +184,8 @@ where
         log::error!("Failed to add a task: {err}");
         err
     })?;
+
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     Ok(RedirectSuccess {
         message: "Задача добавлена.".to_string(),
@@ -205,7 +208,6 @@ where
 
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
-    repo.touch_visited_at(author.id, author.hub_id)?;
 
     let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
@@ -218,6 +220,8 @@ where
             err
         })?;
     }
+
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     Ok(RedirectSuccess {
         message: "Задачи добавлены.".to_string(),
@@ -292,6 +296,7 @@ mod tests {
     struct TaskReaderUserRepo {
         pub task_reader: MockTaskReader,
         pub user_reader: MockUserReader,
+        pub user_writer: MockUserWriter,
     }
 
     impl TaskReaderUserRepo {
@@ -299,6 +304,7 @@ mod tests {
             Self {
                 task_reader: MockTaskReader::new(),
                 user_reader: MockUserReader::new(),
+                user_writer: MockUserWriter::new(),
             }
         }
     }
@@ -351,6 +357,40 @@ mod tests {
             query: UserListQuery,
         ) -> pushkind_common::repository::errors::RepositoryResult<(usize, Vec<User>)> {
             self.user_reader.list_users(query)
+        }
+    }
+
+    impl UserWriter for TaskReaderUserRepo {
+        fn create_or_update_user(
+            &self,
+            new_user: &crate::domain::user::NewUser,
+        ) -> pushkind_common::repository::errors::RepositoryResult<User> {
+            self.user_writer.create_or_update_user(new_user)
+        }
+
+        fn update_user(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+            updates: &crate::domain::user::UpdateUser,
+        ) -> pushkind_common::repository::errors::RepositoryResult<User> {
+            self.user_writer.update_user(user_id, hub_id, updates)
+        }
+
+        fn delete_user(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.user_writer.delete_user(user_id, hub_id)
+        }
+
+        fn touch_visited_at(
+            &self,
+            user_id: i32,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<()> {
+            self.user_writer.touch_visited_at(user_id, hub_id)
         }
     }
 
@@ -515,17 +555,35 @@ mod tests {
         let expected_hub = user.hub_id;
         let hub_for_assert = expected_hub;
         let hub_for_return = expected_hub;
+        let expected_email = user.email.clone();
+        let expected_name = user.name.clone();
+        let expected_user = sample_user_record(5, expected_hub, &expected_email, &expected_name);
 
-        repo.user_reader
-            .expect_get_user_by_email()
+        repo.user_writer
+            .expect_create_or_update_user()
             .times(1)
             .returning({
-                let expected_email = user.email.clone();
-                let expected_hub_id = user.hub_id;
-                move |email, hub_id| {
-                    assert_eq!(email, expected_email.as_str());
-                    assert_eq!(hub_id, expected_hub_id);
-                    Ok(Some(sample_user_record(5, hub_id, email, "Tester")))
+                let expected_hub_id = expected_hub;
+                let expected_email = expected_email.clone();
+                let expected_name = expected_name.clone();
+                let expected_user = expected_user.clone();
+                move |new_user| {
+                    assert_eq!(new_user.hub_id, expected_hub_id);
+                    assert_eq!(new_user.email, expected_email);
+                    assert_eq!(new_user.name, expected_name);
+                    Ok(expected_user.clone())
+                }
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning({
+                let expected_user = expected_user.clone();
+                move |user_id, hub_id| {
+                    assert_eq!(user_id, expected_user.id);
+                    assert_eq!(hub_id, expected_user.hub_id);
+                    Ok(())
                 }
             });
 
@@ -606,15 +664,34 @@ mod tests {
 
         let expected_email = user.email.clone();
         let expected_hub_id = user.hub_id;
-        let expected_user = sample_user_record(7, expected_hub_id, &expected_email, "Tester");
+        let expected_name = user.name.clone();
+        let expected_user = sample_user_record(7, expected_hub_id, &expected_email, &expected_name);
 
-        repo.user_reader
-            .expect_get_user_by_email()
+        repo.user_writer
+            .expect_create_or_update_user()
             .times(1)
-            .returning(move |email, hub_id| {
-                assert_eq!(email, expected_email.as_str());
-                assert_eq!(hub_id, expected_hub_id);
-                Ok(Some(expected_user.clone()))
+            .returning({
+                let expected_email = expected_email.clone();
+                let expected_name = expected_name.clone();
+                let expected_user = expected_user.clone();
+                move |new_user| {
+                    assert_eq!(new_user.hub_id, expected_user.hub_id);
+                    assert_eq!(new_user.email, expected_email);
+                    assert_eq!(new_user.name, expected_name);
+                    Ok(expected_user.clone())
+                }
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning({
+                let expected_user = expected_user.clone();
+                move |user_id, hub_id| {
+                    assert_eq!(user_id, expected_user.id);
+                    assert_eq!(hub_id, expected_user.hub_id);
+                    Ok(())
+                }
             });
 
         let expected_after_date =
@@ -674,13 +751,31 @@ mod tests {
         let expected_name = user.name.clone();
         let user_record = sample_user_record(42, expected_hub_id, &expected_email, &expected_name);
 
-        repo.user_reader
-            .expect_get_user_by_email()
+        repo.user_writer
+            .expect_create_or_update_user()
             .times(1)
-            .returning(move |email, hub_id| {
-                assert_eq!(email, expected_email.as_str());
-                assert_eq!(hub_id, expected_hub_id);
-                Ok(Some(user_record.clone()))
+            .returning({
+                let expected_email = expected_email.clone();
+                let expected_name = expected_name.clone();
+                let user_record = user_record.clone();
+                move |new_user| {
+                    assert_eq!(new_user.hub_id, user_record.hub_id);
+                    assert_eq!(new_user.email, expected_email);
+                    assert_eq!(new_user.name, expected_name);
+                    Ok(user_record.clone())
+                }
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning({
+                let user_record = user_record.clone();
+                move |user_id, hub_id| {
+                    assert_eq!(user_id, user_record.id);
+                    assert_eq!(hub_id, user_record.hub_id);
+                    Ok(())
+                }
             });
 
         let fresh_task_id = 2;
@@ -891,14 +986,7 @@ mod tests {
                 Ok(author_for_create.clone())
             });
 
-        repo.user_writer
-            .expect_touch_visited_at()
-            .times(1)
-            .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id);
-                assert_eq!(hub_id, expected_hub);
-                Ok(())
-            });
+        repo.user_writer.expect_touch_visited_at().never();
 
         repo.task_writer
             .expect_create_task()
@@ -966,14 +1054,7 @@ foo,bar
                 Ok(author_for_create.clone())
             });
 
-        repo.user_writer
-            .expect_touch_visited_at()
-            .times(1)
-            .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, author.id);
-                assert_eq!(hub_id, expected_hub);
-                Ok(())
-            });
+        repo.user_writer.expect_touch_visited_at().never();
 
         repo.task_writer.expect_create_task().never();
 
