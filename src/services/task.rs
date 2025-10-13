@@ -263,7 +263,6 @@ where
     {
         let new_user = user.into();
         let actor = repo.create_or_update_user(&new_user)?;
-        repo.touch_visited_at(actor.id, actor.hub_id)?;
 
         if let Some(data) = status_event_data {
             let event = NewTaskEvent::new(
@@ -294,6 +293,8 @@ where
             );
             repo.record_event(&event).map_err(ServiceError::from)?;
         }
+
+        repo.touch_visited_at(actor.id, actor.hub_id)?;
     }
 
     Ok(RedirectSuccess {
@@ -420,11 +421,10 @@ where
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
-    let submission = form.into_submission();
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
-    repo.touch_visited_at(author.id, author.hub_id)?;
 
+    let submission = form.into_submission();
     let event = NewTaskEvent::new(
         task_id,
         Some(author.id),
@@ -433,6 +433,8 @@ where
     );
 
     repo.record_event(&event).map_err(ServiceError::from)?;
+
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     Ok(RedirectSuccess {
         message: "Комментарий добавлен.".to_string(),

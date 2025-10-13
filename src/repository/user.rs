@@ -154,8 +154,10 @@ impl UserWriter for DieselRepository {
             .filter(users::id.eq(user_id))
             .filter(users::hub_id.eq(hub_id));
 
+        let visited_at = chrono::Local::now().naive_utc();
+
         diesel::update(target)
-            .set(users::visited_at.eq(diesel::dsl::now))
+            .set(users::visited_at.eq(visited_at))
             .execute(&mut conn)?;
 
         Ok(())
