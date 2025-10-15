@@ -17,7 +17,7 @@ use crate::forms::task::{NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskFor
 use crate::repository::{
     TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
-use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
+use crate::services::{ServiceError, ServiceResult};
 
 /// Task event accompanied by the optional author information.
 #[derive(Debug, Serialize)]
@@ -180,7 +180,7 @@ pub fn update_task<R>(
     user: &AuthenticatedUser,
     task_id: i32,
     form: UpdateTaskForm,
-) -> ServiceResult<RedirectSuccess>
+) -> ServiceResult<Task>
 where
     R: TaskReader + TaskWriter + TaskEventWriter + UserReader + UserWriter + ?Sized,
 {
@@ -297,10 +297,7 @@ where
         repo.touch_visited_at(actor.id, actor.hub_id)?;
     }
 
-    Ok(RedirectSuccess {
-        message: "Задача обновлена.".to_string(),
-        redirect_to: format!("/task/{}", updated.id),
-    })
+    Ok(updated)
 }
 
 fn apply_assignment_updates(
@@ -404,7 +401,7 @@ pub fn add_task_comment<R>(
     user: &AuthenticatedUser,
     task_id: i32,
     form: NewTaskCommentForm,
-) -> ServiceResult<RedirectSuccess>
+) -> ServiceResult<TaskEvent>
 where
     R: TaskReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
 {
@@ -432,14 +429,11 @@ where
         json!({ "text": submission.text }),
     );
 
-    repo.record_event(&event).map_err(ServiceError::from)?;
+    let recorded = repo.record_event(&event).map_err(ServiceError::from)?;
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
-    Ok(RedirectSuccess {
-        message: "Комментарий добавлен.".to_string(),
-        redirect_to: format!("/task/{}", task_id),
-    })
+    Ok(recorded)
 }
 
 fn assignment_event_user(user: &User) -> Value {
@@ -451,11 +445,7 @@ fn assignment_event_user(user: &User) -> Value {
 }
 
 /// Remove the specified task after verifying permissions and existence.
-pub fn delete_task<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
-    task_id: i32,
-) -> ServiceResult<RedirectSuccess>
+pub fn delete_task<R>(repo: &R, user: &AuthenticatedUser, task_id: i32) -> ServiceResult<()>
 where
     R: TaskReader + TaskWriter + ?Sized,
 {
@@ -477,10 +467,7 @@ where
             other => ServiceError::from(other),
         })?;
 
-    Ok(RedirectSuccess {
-        message: "Задача удалена.".to_string(),
-        redirect_to: "/".to_string(),
-    })
+    Ok(())
 }
 
 #[cfg(test)]
@@ -927,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_task_returns_redirect_on_success() {
+    fn delete_task_returns_unit_on_success() {
         let task = sample_task(7, 1, None, 4);
         let mut repo = TaskDeleteRepo::new();
         repo.task_reader.expect_get_task_by_id().return_once({
@@ -947,10 +934,7 @@ mod tests {
         });
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let outcome = delete_task(&repo, &user, 7).expect("should delete task");
-
-        assert_eq!(outcome.message, "Задача удалена.");
-        assert_eq!(outcome.redirect_to, "/");
+        delete_task(&repo, &user, 7).expect("should delete task");
     }
 
     #[test]
@@ -1208,8 +1192,8 @@ mod tests {
 
         let outcome = update_task(&repo, &user, 42, form).expect("should update task");
 
-        assert_eq!(outcome.message, "Задача обновлена.");
-        assert_eq!(outcome.redirect_to, "/task/42");
+        assert_eq!(outcome.id, 42);
+        assert_eq!(outcome.title, "Updated title");
 
         let stored = repo.task.borrow().clone();
         assert_eq!(stored.title, "Updated title");
@@ -1398,8 +1382,8 @@ mod tests {
 
         let outcome = update_task(&repo, &user, 11, form).expect("expected update to succeed");
 
-        assert_eq!(outcome.message, "Задача обновлена.");
-        assert_eq!(outcome.redirect_to, "/task/11");
+        assert_eq!(outcome.id, 11);
+        assert_eq!(outcome.title, "Updated");
 
         {
             let stored = repo.task.borrow();
@@ -1458,10 +1442,10 @@ mod tests {
             message: "Новый комментарий".to_string(),
         };
 
-        let outcome = add_task_comment(&repo, &user, task.id, form).expect("should add comment");
-
-        assert_eq!(outcome.message, "Комментарий добавлен.");
-        assert_eq!(outcome.redirect_to, format!("/task/{}", task.id));
+        let recorded = add_task_comment(&repo, &user, task.id, form).expect("should add comment");
+        assert_eq!(recorded.task_id, task.id);
+        assert_eq!(recorded.event_type, TaskEventType::Comment);
+        assert_eq!(recorded.event_data, json!({"text": "Новый комментарий"}));
 
         let events = repo.events.borrow();
         assert_eq!(events.len(), 1);

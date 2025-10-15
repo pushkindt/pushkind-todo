@@ -9,7 +9,7 @@ use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskStatus};
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
-use crate::services::{RedirectSuccess, ServiceError, ServiceResult};
+use crate::services::{ServiceError, ServiceResult};
 
 /// Query parameters accepted by the index page service.
 #[derive(Debug, Default, Deserialize)]
@@ -152,11 +152,7 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 }
 
 /// Validates the add-task form and persists a new task record.
-pub fn add_task<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
-    form: AddTaskForm,
-) -> ServiceResult<RedirectSuccess>
+pub fn add_task<R>(repo: &R, user: &AuthenticatedUser, form: AddTaskForm) -> ServiceResult<Task>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
@@ -180,17 +176,14 @@ where
         }
     };
 
-    repo.create_task(&new_task).map_err(|err| {
+    let created = repo.create_task(&new_task).map_err(|err| {
         log::error!("Failed to add a task: {err}");
         err
     })?;
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
-    Ok(RedirectSuccess {
-        message: "Задача добавлена.".to_string(),
-        redirect_to: "/".to_string(),
-    })
+    Ok(created)
 }
 
 /// Parses the uploaded CSV file and creates task records in bulk.
@@ -198,7 +191,7 @@ pub fn upload_tasks<R>(
     repo: &R,
     user: &AuthenticatedUser,
     form: &mut UploadTasksForm,
-) -> ServiceResult<RedirectSuccess>
+) -> ServiceResult<usize>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
@@ -214,6 +207,8 @@ where
         ServiceError::Form("Ошибка при парсинге задач".to_string())
     })?;
 
+    let created_count = new_tasks.len();
+
     for new_task in new_tasks {
         repo.create_task(&new_task).map_err(|err| {
             log::error!("Failed to add a task: {err}");
@@ -223,10 +218,7 @@ where
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
-    Ok(RedirectSuccess {
-        message: "Задачи добавлены.".to_string(),
-        redirect_to: "/".to_string(),
-    })
+    Ok(created_count)
 }
 
 #[cfg(test)]
@@ -890,13 +882,13 @@ mod tests {
 
         let result = add_task(&repo, &user, form);
 
-        let redirect = match result {
+        let created = match result {
             Ok(value) => value,
             Err(err) => panic!("expected success, got error: {err}"),
         };
 
-        assert_eq!(redirect.message, "Задача добавлена.");
-        assert_eq!(redirect.redirect_to, "/");
+        assert_eq!(created.hub_id, expected_hub);
+        assert_eq!(created.title, "alpha");
     }
 
     #[test]
@@ -1136,13 +1128,12 @@ beta,
 
         let result = upload_tasks(&repo, &user, &mut form);
 
-        let redirect = match result {
+        let created_count = match result {
             Ok(value) => value,
             Err(err) => panic!("expected success, got error: {err}"),
         };
 
-        assert_eq!(redirect.message, "Задачи добавлены.");
-        assert_eq!(redirect.redirect_to, "/");
+        assert_eq!(created_count, 2);
 
         let titles = match captured_titles.lock() {
             Ok(guard) => guard.clone(),

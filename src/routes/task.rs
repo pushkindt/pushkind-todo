@@ -85,9 +85,9 @@ pub async fn update_task(
     let task_id = task_id.into_inner();
 
     match task_service::update_task(repo.get_ref(), &user, task_id, form) {
-        Ok(outcome) => {
-            FlashMessage::success(outcome.message).send();
-            redirect(&outcome.redirect_to)
+        Ok(updated_task) => {
+            FlashMessage::success("Задача обновлена.").send();
+            redirect(&format!("/task/{}", updated_task.id))
         }
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
@@ -119,9 +119,9 @@ pub async fn add_task_comment(
     let task_id = task_id.into_inner();
 
     match task_service::add_task_comment(repo.get_ref(), &user, task_id, form) {
-        Ok(outcome) => {
-            FlashMessage::success(outcome.message).send();
-            redirect(&outcome.redirect_to)
+        Ok(_) => {
+            FlashMessage::success("Комментарий добавлен.").send();
+            redirect(&format!("/task/{}", task_id))
         }
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
@@ -152,9 +152,9 @@ pub async fn delete_task(
     let task_id = task_id.into_inner();
 
     match task_service::delete_task(repo.get_ref(), &user, task_id) {
-        Ok(outcome) => {
-            FlashMessage::success(outcome.message).send();
-            redirect(&outcome.redirect_to)
+        Ok(()) => {
+            FlashMessage::success("Задача удалена.").send();
+            redirect("/")
         }
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();

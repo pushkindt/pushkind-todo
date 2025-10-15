@@ -1,0 +1,41 @@
+[Unit]
+Description=pushkind-todo (Actix-Web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Run as your dedicated service user:
+User=www-data10
+Group=www-data
+
+# From Supervisor's directory/command
+WorkingDirectory=/var/www10/html
+ExecStart=/var/www10/html/pushkind-todo
+
+# Supervisor: autorestart=true
+Restart=on-failure
+RestartSec=2
+
+# Supervisor: stopasgroup=true & killasgroup=true
+KillMode=control-group
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Journald logging (recommended). Uncomment to also log to a file:
+# StandardOutput=append:/var/log/todo/todo.log
+# StandardError=inherit
+
+# Security hardening (adjust writable paths if needed)
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www10/html
+AmbientCapabilities=
+CapabilityBoundingSet=
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+
