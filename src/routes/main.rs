@@ -55,9 +55,9 @@ pub async fn add_task(
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
     match main_service::add_task(repo.get_ref(), &user, form) {
-        Ok(outcome) => {
-            FlashMessage::success(outcome.message).send();
-            redirect(&outcome.redirect_to)
+        Ok(_) => {
+            FlashMessage::success("Задача добавлена.").send();
+            redirect("/")
         }
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
@@ -82,9 +82,9 @@ pub async fn tasks_upload(
     MultipartForm(mut form): MultipartForm<UploadTasksForm>,
 ) -> impl Responder {
     match main_service::upload_tasks(repo.get_ref(), &user, &mut form) {
-        Ok(outcome) => {
-            FlashMessage::success(outcome.message).send();
-            redirect(&outcome.redirect_to)
+        Ok(created_count) => {
+            FlashMessage::success(format!("Добавлено задач: {created_count}")).send();
+            redirect("/")
         }
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
