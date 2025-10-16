@@ -260,32 +260,32 @@ impl TaskListFilters {
 /// Patch payload used when updating an existing task.
 #[derive(Debug, Clone)]
 pub struct UpdateTask {
-    /// Optional new title.
-    pub title: Option<String>,
-    /// Optional new description (inner `None` clears the description).
-    pub description: Option<Option<String>>,
-    /// Optional new status value.
-    pub status: Option<TaskStatus>,
-    /// Optional due date change (inner `None` clears the due date).
-    pub due_date: Option<Option<NaiveDate>>,
-    /// Optional change to the assigned user (inner `None` unassigns the task).
-    pub assigned_to: Option<Option<i32>>,
-    /// Optional change to the completion timestamp (inner `None` clears the timestamp).
-    pub completed_at: Option<Option<NaiveDateTime>>,
+    /// New title value for the task.
+    pub title: String,
+    /// New description content for the task.
+    pub description: Option<String>,
+    /// Updated status value.
+    pub status: TaskStatus,
+    /// Updated due date for the task.
+    pub due_date: Option<NaiveDate>,
+    /// Updated assignee for the task.
+    pub assigned_to: Option<i32>,
+    /// Updated completion timestamp for the task.
+    pub completed_at: Option<NaiveDateTime>,
     /// Timestamp when the update payload was constructed.
     pub updated_at: NaiveDateTime,
 }
 
 impl UpdateTask {
-    /// Construct an empty update payload with the current timestamp.
-    pub fn new() -> Self {
+    /// Construct an update payload seeded with the current state of a task.
+    pub fn from_task(task: &Task) -> Self {
         Self {
-            title: None,
-            description: None,
-            status: None,
-            due_date: None,
-            assigned_to: None,
-            completed_at: None,
+            title: task.title.clone(),
+            description: task.description.clone(),
+            status: task.status,
+            due_date: task.due_date,
+            assigned_to: task.assigned_to,
+            completed_at: task.completed_at,
             updated_at: chrono::Local::now().naive_utc(),
         }
     }
@@ -297,76 +297,70 @@ impl UpdateTask {
     /// Replace the task title.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.touch();
-        self.title = Some(title.into());
+        self.title = title.into();
         self
     }
 
     /// Update the description for the task.
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.touch();
-        self.description = Some(Some(description.into()));
+        self.description = Some(description.into());
         self
     }
 
     /// Clear the description field.
     pub fn clear_description(mut self) -> Self {
         self.touch();
-        self.description = Some(None);
+        self.description = None;
         self
     }
 
     /// Change the task status.
     pub fn status(mut self, status: TaskStatus) -> Self {
         self.touch();
-        self.status = Some(status);
+        self.status = status;
         self
     }
 
     /// Set or update the due date.
     pub fn due_date(mut self, due_date: NaiveDate) -> Self {
         self.touch();
-        self.due_date = Some(Some(due_date));
+        self.due_date = Some(due_date);
         self
     }
 
     /// Remove the due date from the task.
     pub fn clear_due_date(mut self) -> Self {
         self.touch();
-        self.due_date = Some(None);
+        self.due_date = None;
         self
     }
 
     /// Assign the task to a specific user.
     pub fn assign_to(mut self, assignee_id: i32) -> Self {
         self.touch();
-        self.assigned_to = Some(Some(assignee_id));
+        self.assigned_to = Some(assignee_id);
         self
     }
 
     /// Remove the assignee from the task.
     pub fn unassign(mut self) -> Self {
         self.touch();
-        self.assigned_to = Some(None);
+        self.assigned_to = None;
         self
     }
 
     /// Mark the task as completed at a specific time.
     pub fn completed_at(mut self, timestamp: NaiveDateTime) -> Self {
         self.touch();
-        self.completed_at = Some(Some(timestamp));
+        self.completed_at = Some(timestamp);
         self
     }
 
     /// Remove any stored completion timestamp.
     pub fn clear_completed_at(mut self) -> Self {
         self.touch();
-        self.completed_at = Some(None);
+        self.completed_at = None;
         self
-    }
-}
-
-impl Default for UpdateTask {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -188,7 +188,7 @@ impl TaskWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
-        if let Some(Some(assignee_id)) = updates.assigned_to {
+        if let Some(assignee_id) = updates.assigned_to {
             let assignee = users::table
                 .filter(users::id.eq(assignee_id))
                 .filter(users::hub_id.eq(hub_id))

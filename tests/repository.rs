@@ -265,7 +265,7 @@ fn test_task_repository_crud() {
     assert_eq!(due_total, 1);
     assert_eq!(due_results[0].id, beta.id);
 
-    let update = DomainUpdateTask::new()
+    let update = DomainUpdateTask::from_task(&alpha)
         .title("Alpha Updated")
         .status(TaskStatus::Completed);
     alpha = repo
@@ -274,7 +274,7 @@ fn test_task_repository_crud() {
     assert_eq!(alpha.title, "Alpha Updated");
     assert_eq!(alpha.status, TaskStatus::Completed);
 
-    let cross_update = DomainUpdateTask::new().title("Intruder");
+    let cross_update = DomainUpdateTask::from_task(&alpha).title("Intruder");
     let err = repo
         .update_task(alpha.id, 2, &cross_update)
         .expect_err("cross hub update should fail");

@@ -4,10 +4,7 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use validator::Validate;
 
-use crate::domain::{
-    task::{TaskStatus, UpdateTask},
-    user::NewUser,
-};
+use crate::domain::{task::TaskStatus, user::NewUser};
 
 /// Form payload submitted from the task edit modal.
 #[derive(Debug, Deserialize, Validate)]
@@ -75,28 +72,22 @@ impl UpdateTaskForm {
             None => None,
         };
 
-        let mut updates = UpdateTask::new().title(title).status(status);
-
-        updates = match message {
-            Some(body) => {
-                let sanitized = ammonia::clean(&body);
-                if sanitized.trim().is_empty() {
-                    updates.clear_description()
-                } else {
-                    updates.description(sanitized)
-                }
-            }
-            None => updates.clear_description(),
-        };
-
-        updates = match due_date {
-            Some(date) => updates.due_date(date),
-            None => updates.clear_due_date(),
-        };
-
         Ok(TaskUpdateSubmission {
             task_id,
-            updates,
+            title,
+            description: match message {
+                Some(body) => {
+                    let sanitized = ammonia::clean(&body);
+                    if sanitized.trim().is_empty() {
+                        None
+                    } else {
+                        Some(sanitized)
+                    }
+                }
+                None => None,
+            },
+            status,
+            due_date,
             assignee: assignee.into_selection(),
         })
     }
@@ -107,8 +98,14 @@ impl UpdateTaskForm {
 pub struct TaskUpdateSubmission {
     /// Identifier of the task being updated.
     pub task_id: i32,
-    /// Domain update payload built from the form fields.
-    pub updates: UpdateTask,
+    /// Updated title provided in the form.
+    pub title: String,
+    /// Sanitized HTML description or `None` to clear it.
+    pub description: Option<String>,
+    /// Desired status for the task after the update.
+    pub status: TaskStatus,
+    /// Parsed due date value, if provided.
+    pub due_date: Option<NaiveDate>,
     /// Optional assignee selected in the form.
     pub assignee: Option<AssigneeSelection>,
 }
