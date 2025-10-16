@@ -203,7 +203,10 @@ where
 
     let TaskUpdateSubmission {
         task_id,
-        updates,
+        title,
+        description,
+        status,
+        due_date,
         assignee,
     } = submission;
 
@@ -218,6 +221,20 @@ where
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
+    };
+
+    let mut updates = UpdateTask::from_task(&current_task)
+        .title(title)
+        .status(status);
+
+    updates = match description {
+        Some(body) => updates.description(body),
+        None => updates.clear_description(),
+    };
+
+    updates = match due_date {
+        Some(date) => updates.due_date(date),
+        None => updates.clear_due_date(),
     };
 
     let updates = apply_assignment_updates(
@@ -679,16 +696,20 @@ mod tests {
 
     #[test]
     fn apply_assignment_updates_assigns_and_unassigns() {
-        let base = UpdateTask::new();
-        let assigned = apply_assignment_updates(base, Some(1), Some(2));
-        assert_eq!(assigned.assigned_to, Some(Some(2)));
+        let base_assigned = sample_task(1, 1, Some(1), 2);
+        let assigned =
+            apply_assignment_updates(UpdateTask::from_task(&base_assigned), Some(1), Some(2));
+        assert_eq!(assigned.assigned_to, Some(2));
 
-        let base = UpdateTask::new();
-        let unassigned = apply_assignment_updates(base, Some(1), None);
-        assert_eq!(unassigned.assigned_to, Some(None));
+        let base_with_assignee = sample_task(2, 1, Some(1), 2);
+        let unassigned =
+            apply_assignment_updates(UpdateTask::from_task(&base_with_assignee), Some(1), None);
+        assert!(unassigned.assigned_to.is_none());
 
-        let unchanged = apply_assignment_updates(UpdateTask::new(), Some(3), Some(3));
-        assert_eq!(unchanged.assigned_to, None);
+        let base_same_assignee = sample_task(3, 1, Some(3), 2);
+        let unchanged =
+            apply_assignment_updates(UpdateTask::from_task(&base_same_assignee), Some(3), Some(3));
+        assert_eq!(unchanged.assigned_to, Some(3));
     }
 
     #[test]
@@ -1030,30 +1051,12 @@ mod tests {
                 return Err(RepositoryError::NotFound);
             }
 
-            if let Some(ref title) = updates.title {
-                task.title = title.clone();
-            }
-
-            if let Some(ref description) = updates.description {
-                task.description = description.clone();
-            }
-
-            if let Some(status) = updates.status {
-                task.status = status;
-            }
-
-            if let Some(due_date) = updates.due_date {
-                task.due_date = due_date;
-            }
-
-            if let Some(assigned_to) = updates.assigned_to {
-                task.assigned_to = assigned_to;
-            }
-
-            if let Some(completed_at) = updates.completed_at {
-                task.completed_at = completed_at;
-            }
-
+            task.title = updates.title.clone();
+            task.description = updates.description.clone();
+            task.status = updates.status;
+            task.due_date = updates.due_date;
+            task.assigned_to = updates.assigned_to;
+            task.completed_at = updates.completed_at;
             task.updated_at = updates.updated_at;
 
             Ok(task.clone())

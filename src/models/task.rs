@@ -43,13 +43,14 @@ pub struct NewTask<'a> {
 
 #[derive(Debug, AsChangeset)]
 #[diesel(table_name = crate::schema::tasks)]
+#[diesel(treat_none_as_null = true)]
 pub struct UpdateTask<'a> {
-    pub title: Option<&'a str>,
-    pub description: Option<Option<&'a str>>,
-    pub status: Option<&'a str>,
-    pub due_date: Option<Option<NaiveDate>>,
-    pub assigned_to: Option<Option<i32>>,
-    pub completed_at: Option<Option<NaiveDateTime>>,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub status: &'a str,
+    pub due_date: Option<NaiveDate>,
+    pub assigned_to: Option<i32>,
+    pub completed_at: Option<NaiveDateTime>,
     pub updated_at: NaiveDateTime,
 }
 
@@ -181,12 +182,9 @@ impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
 impl<'a> From<&'a DomainUpdateTask> for UpdateTask<'a> {
     fn from(value: &'a DomainUpdateTask) -> Self {
         Self {
-            title: value.title.as_deref(),
-            description: value
-                .description
-                .as_ref()
-                .map(|opt| opt.as_ref().map(|text| text.as_str())),
-            status: value.status.map(<&'static str>::from),
+            title: value.title.as_str(),
+            description: value.description.as_deref(),
+            status: <&'static str>::from(value.status),
             due_date: value.due_date,
             assigned_to: value.assigned_to,
             completed_at: value.completed_at,
