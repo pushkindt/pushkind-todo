@@ -66,8 +66,8 @@
     {% endif %}
 {% endmacro metadata_value %}
 
-{% macro task_description(description) %}
-    <div class="p-1 border rounded">
+{% macro task_description(description, truncate_content=true) %}
+    <div class="p-1 border rounded {% if truncate_content %}content-truncate{% endif %}">
         {{ description | default(value="—") | safe }}
     </div>
 {% endmacro task_description %}

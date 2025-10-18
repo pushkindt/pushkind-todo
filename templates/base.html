@@ -35,6 +35,12 @@
             /* background-color: rgb(255, 255, 206); */
             background-color: rgb(254, 244, 221);
         }
+
+        .content-truncate {
+            height: 75px;   /* Set the height you want */
+            overflow: hidden;
+            position: relative;
+        }
     </style>
 </head>
 
@@ -76,6 +82,12 @@
         }
 
         document.addEventListener("DOMContentLoaded", () => {
+
+            document.querySelectorAll('.toggle-content-truncate').forEach(element => {
+                element.addEventListener('click', () => {
+                    element.classList.toggle('content-truncate');
+                });
+            });
 
             var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'))
             var popoverList = popoverTriggerList.map(function (popoverTriggerEl) {
