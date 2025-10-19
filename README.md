@@ -32,6 +32,20 @@ of Actix Web, Diesel, and Tera and integrates tightly with the shared
 - **JSON task feed** – The `/v1/tasks` endpoint exposes the same filtered task
   list over JSON for integrations that need a machine-readable snapshot.
 
+## Pages
+
+- **Main page** – Displays the paginated task list with search and filter
+  controls. Tasks are sorted by their `updated_at` timestamp with the most
+  recently updated first. Entries whose `updated_at` is more recent than the
+  current user's `visited_at` are highlighted so users can quickly spot changes
+  since their last visit. The page also includes the quick-create form for
+  adding new tasks, and clicking a task row opens its detail page.
+- **Task details page** – Shows the full task metadata alongside editing
+  controls for the title, description, deadline, assignee, and status. Users can
+  add comments and review the chronological event log. Any changes made to the
+  task or comments that are submitted create corresponding entries in the task's
+  event stream.
+
 ## Architecture at a Glance
 
 The codebase follows a clean, layered structure so that business logic can be
