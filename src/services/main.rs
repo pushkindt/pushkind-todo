@@ -123,14 +123,10 @@ fn parse_status_filter(input: &str) -> Option<TaskStatus> {
         return None;
     }
 
-    match trimmed {
-        "Pending" => Some(TaskStatus::Pending),
-        "InProgress" => Some(TaskStatus::InProgress),
-        "Blocked" => Some(TaskStatus::Blocked),
-        "Completed" => Some(TaskStatus::Completed),
-        "Archived" => Some(TaskStatus::Archived),
-        _ => None,
-    }
+    let status = TaskStatus::from(trimmed);
+    let status_text: &str = <&str>::from(status);
+
+    (status_text == trimmed).then_some(status)
 }
 
 fn parse_date_filter(input: &str) -> Option<NaiveDate> {
