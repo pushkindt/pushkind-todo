@@ -1,7 +1,12 @@
 {% extends 'base.html' %}
 
 {% block styles %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.css" rel="stylesheet">
 <style>
+    .ts-control {
+        border: none;
+        padding: 0;
+    }
     .add-task-container {
         display: flex;
         align-items: center;
@@ -147,8 +152,43 @@
 
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
 <script>
+
     document.addEventListener("DOMContentLoaded", () => {
+
+        document.getElementById("user-add-form-id").addEventListener("change", function() {
+            const selected = this.options[this.selectedIndex];
+            document.getElementById("user-email").value = selected.value;
+            document.getElementById("user-name").value = selected.text;
+        });
+
+        let tomSelectInstance = new TomSelect('#user-add-form-id', {
+            valueField: "email",
+            labelField: "name",
+            searchField: ["name", "email"],
+            render: {
+                option: function (item, escape) {
+                    let result = `<div class="border-bottom"><strong>${escape(item.name)} (${escape(item.email)})</strong>`;
+                    result += '</div>';
+                    return result
+                }
+            },
+            load: function(query, callback) {
+
+                var url = '{{home_url|safe}}/api/v1/users?page=1&role=todo&query=' + encodeURIComponent(query);
+                fetch(url, {credentials: 'include'})
+                    .then(response => response.json())
+                    .then(json => {
+                        console.log(json);
+                        callback(json.slice(0, 20));
+                    }).catch(()=>{
+                        callback();
+                    });
+
+            },
+        });
+
         var selectableList = document.querySelectorAll(".selectable");
         selectableList.forEach((selectable) => {
             selectable.addEventListener("click", () => {

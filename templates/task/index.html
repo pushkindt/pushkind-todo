@@ -1,10 +1,13 @@
 {% extends 'base.html' %}
 
 {% block styles %}
-<link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.13.3/css/selectize.bootstrap4.min.css"
-    integrity="sha512-MMojOrCQrqLg4Iarid2YMYyZ7pzjPeXKRvhW9nZqLo6kPBBTuvNET9DBVWptAo/Q20Fy11EIHM5ig4WlIrJfQw=="
-    crossorigin="anonymous" referrerpolicy="no-referrer" />
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.css" rel="stylesheet">
+<style>
+    .ts-control {
+        border: none;
+        padding: 0;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -130,25 +133,17 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"
-    integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous">
-    </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/selectize.js/0.13.3/js/standalone/selectize.min.js"
-    integrity="sha512-pF+DNRwavWMukUv/LyzDyDMn8U2uvqYQdJN0Zvilr6DDo/56xPDZdDoyPDYZRSL4aOKO/FGKXTpzDyQJ8je8Qw=="
-    crossorigin="anonymous" referrerpolicy="no-referrer">
-    </script>
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
 <script>
 
     document.addEventListener("DOMContentLoaded", () => {
 
-        let user_select = null;
+        let tomSelectInstance = null;
 
         document.addEventListener("htmx:beforeSwap", function (evt) {
-            if (user_select) {
-                let selectize_instance = user_select[0].selectize;
-                selectize_instance.destroy();
-                user_select.remove();
-                user_select = null;
+            if (tomSelectInstance) {
+                tomSelectInstance.destroy();
+                tomSelectInstance = null;
             }
         });
 
@@ -165,9 +160,8 @@
                 });
             }
 
-            let user_select = $("#user-add-form-id");
-            user_select.selectize({
-                valueField: "sub",
+            tomSelectInstance = new TomSelect('#user-add-form-id', {
+                valueField: "email",
                 labelField: "name",
                 searchField: ["name", "email"],
                 render: {
@@ -177,35 +171,25 @@
                         return result
                     }
                 },
-                options: [],
-                load: function (query, callback) {
-                    if (!query.length) return callback();
-                    $.ajax({
-                        url: '{{home_url|safe}}/api/v1/users?page=1&role=todo&query=' + encodeURIComponent(query),
-                        type: 'GET',
-                        error: function () {
+                load: function(query, callback) {
+
+                    var url = '{{home_url|safe}}/api/v1/users?page=1&role=todo&query=' + encodeURIComponent(query);
+                    fetch(url, {credentials: 'include'})
+                        .then(response => response.json())
+                        .then(json => {
+                            console.log(json);
+                            callback(json.slice(0, 20));
+                        }).catch(()=>{
                             callback();
-                        },
-                        success: function (res) {
-                            callback(res.slice(0, 20));
-                        },
-                        xhrFields: {
-                            withCredentials: true
-                        },
-                    });
+                        });
+
                 },
             });
-            let selectize_instance = user_select[0].selectize;
 
-            selectize_instance.on("change", function (value) {
-                const selected = selectize_instance.options[value];
-                if (selected) {
-                    $("#user-name").val(selected.name);
-                    $("#user-email").val(selected.email);
-                } else {
-                    $("#user-name").val('');
-                    $("#user-email").val('');
-                }
+            document.getElementById("user-add-form-id").addEventListener("change", function() {
+                const selected = this.options[this.selectedIndex];
+                document.getElementById("user-email").value = selected.value;
+                document.getElementById("user-name").value = selected.text;
             });
         });
     });

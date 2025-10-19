@@ -31,6 +31,7 @@ thiserror = "2.0.17"
 pushkind-common = { git = "https://github.com/pushkindt/pushkind-common.git", branch = "main", features = [
     "db",
     "actix",
+    "zeromq",
 ] }
 validator = { version = "0.20.0", features = ["derive"] }
 ammonia = "4.1.2"

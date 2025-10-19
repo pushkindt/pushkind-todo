@@ -236,6 +236,7 @@ mod tests {
         UpdateTask as DomainUpdateTask,
     };
     use crate::domain::user::User;
+    use crate::forms::task::AssigneeSelectionForm;
     use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
     use crate::repository::{TaskWriter, UserListQuery, UserReader, UserWriter};
 
@@ -501,6 +502,20 @@ mod tests {
             hub_id: i32,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.touch_visited_at(user_id, hub_id)
+        }
+    }
+
+    fn assignee_selection_form_none() -> AssigneeSelectionForm {
+        AssigneeSelectionForm {
+            email: None,
+            name: None,
+        }
+    }
+
+    fn _assignee_selection_form_some() -> AssigneeSelectionForm {
+        AssigneeSelectionForm {
+            email: Some("test@test.test".to_string()),
+            name: Some("Test".to_string()),
         }
     }
 
@@ -798,6 +813,7 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            assignee: assignee_selection_form_none(),
         };
 
         let result = add_task(&repo, &user, form);
@@ -812,6 +828,7 @@ mod tests {
         let form = AddTaskForm {
             title: Some(String::new()),
             message: None,
+            assignee: assignee_selection_form_none(),
         };
 
         let result = add_task(&repo, &user, form);
@@ -831,6 +848,7 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            assignee: assignee_selection_form_none(),
         };
 
         let expected_hub = user.hub_id;
@@ -898,6 +916,7 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            assignee: assignee_selection_form_none(),
         };
 
         let expected_hub = user.hub_id;
@@ -954,6 +973,7 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            assignee: assignee_selection_form_none(),
         };
 
         let expected_hub = user.hub_id;

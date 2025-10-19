@@ -7,7 +7,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use validator::Validate;
 
-use crate::domain::task::NewTask;
+use crate::{domain::task::NewTask, forms::task::AssigneeSelectionForm};
 
 #[derive(Deserialize, Validate)]
 pub struct AddTaskForm {
@@ -16,6 +16,9 @@ pub struct AddTaskForm {
     pub title: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub message: Option<String>,
+    /// Assignee data captured by the modal.
+    #[serde(flatten, default)]
+    pub assignee: AssigneeSelectionForm,
 }
 
 impl AddTaskForm {
