@@ -9,6 +9,26 @@ use validator::Validate;
 
 use crate::{domain::task::NewTask, forms::task::AssigneeSelectionForm};
 
+/// Build a [`NewTask`] payload with sanitized content shared across forms and services.
+pub(crate) fn build_new_task_payload(
+    hub_id: i32,
+    author_id: i32,
+    title: String,
+    description: Option<String>,
+) -> NewTask {
+    let mut new_task = NewTask::new(hub_id, author_id, title);
+
+    if let Some(description) = description {
+        let sanitized = ammonia::clean(&description);
+
+        if !sanitized.trim().is_empty() {
+            new_task = new_task.description(sanitized);
+        }
+    }
+
+    new_task
+}
+
 #[derive(Deserialize, Validate)]
 pub struct AddTaskForm {
     #[validate(length(min = 1))]
@@ -26,13 +46,12 @@ impl AddTaskForm {
     pub fn into_new_task(self, hub_id: i32, author_id: i32) -> Option<NewTask> {
         let title = self.title?;
 
-        let mut new_task = NewTask::new(hub_id, author_id, title);
-
-        if let Some(description) = self.message {
-            new_task = new_task.description(ammonia::clean(&description));
-        }
-
-        Some(new_task)
+        Some(build_new_task_payload(
+            hub_id,
+            author_id,
+            title,
+            self.message,
+        ))
     }
 }
 
@@ -100,11 +119,7 @@ fn parse_tasks<R: Read>(
         let record = row?;
 
         if let Some(title) = record.title {
-            let mut task = NewTask::new(hub_id, author_id, title);
-
-            if let Some(description) = record.description {
-                task = task.description(ammonia::clean(&description));
-            }
+            let task = build_new_task_payload(hub_id, author_id, title, record.description);
 
             tasks.push(task);
         }
@@ -151,5 +166,21 @@ mod tests {
             Err(other) => panic!("expected csv parse error, got {:?}", other),
             Ok(tasks) => panic!("expected csv parse error but parsed {} rows", tasks.len()),
         }
+    }
+
+    #[test]
+    fn build_new_task_payload_discards_empty_descriptions() {
+        let task = build_new_task_payload(1, 2, "title".to_string(), Some("   ".to_string()));
+
+        assert!(task.description.is_none());
+    }
+
+    #[test]
+    fn parse_tasks_discards_blank_descriptions() {
+        let csv = "title,description\nfoo,   \n";
+        let tasks = parse_tasks(Cursor::new(csv), 5, 7).expect("should parse");
+
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].description.is_none());
     }
 }

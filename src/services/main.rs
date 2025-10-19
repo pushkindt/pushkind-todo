@@ -6,8 +6,8 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::task::{NewTask, Task, TaskStatus};
-use crate::forms::main::{AddTaskForm, UploadTasksForm};
+use crate::domain::task::{Task, TaskStatus};
+use crate::forms::main::{AddTaskForm, UploadTasksForm, build_new_task_payload};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{ServiceError, ServiceResult};
 
@@ -182,11 +182,7 @@ where
         }
     };
 
-    let mut new_task = NewTask::new(user.hub_id, author.id, title);
-
-    if let Some(description) = message {
-        new_task = new_task.description(ammonia::clean(&description));
-    }
+    let mut new_task = build_new_task_payload(user.hub_id, author.id, title, message);
 
     let assignee_user = match assignee.into_selection() {
         Some(selection) => {
@@ -533,13 +529,6 @@ mod tests {
         AssigneeSelectionForm {
             email: None,
             name: None,
-        }
-    }
-
-    fn _assignee_selection_form_some() -> AssigneeSelectionForm {
-        AssigneeSelectionForm {
-            email: Some("test@test.test".to_string()),
-            name: Some("Test".to_string()),
         }
     }
 
@@ -964,7 +953,7 @@ mod tests {
             .expect_create_or_update_user()
             .times(2)
             .returning({
-                let expected_hub = expected_hub;
+                let expected_hub_id = expected_hub;
                 let expected_author_email = expected_email_lower.clone();
                 let expected_author_name = expected_name.clone();
                 let author_for_return = author.clone();
@@ -972,7 +961,7 @@ mod tests {
                 let expected_assignee_name = assignee_name.clone();
                 let assignee_for_return = assignee_record.clone();
                 move |new_user| {
-                    assert_eq!(new_user.hub_id, expected_hub);
+                    assert_eq!(new_user.hub_id, expected_hub_id);
 
                     if new_user.email == expected_author_email {
                         assert_eq!(new_user.name, expected_author_name);
@@ -1002,17 +991,17 @@ mod tests {
             .expect_create_task()
             .times(1)
             .withf({
-                let expected_hub = expected_hub;
-                let expected_author_id = expected_author_id;
-                let expected_assignee_id = expected_assignee_id;
+                let expected_hub_id = expected_hub;
+                let expected_author_id_capture = expected_author_id;
+                let expected_assignee_id_capture = expected_assignee_id;
                 move |task| {
-                    assert_eq!(task.hub_id, expected_hub);
+                    assert_eq!(task.hub_id, expected_hub_id);
                     assert_eq!(task.title, "alpha");
                     assert_eq!(task.description, None);
                     assert_eq!(task.status, TaskStatus::Pending);
                     assert!(task.due_date.is_none());
-                    assert_eq!(task.assigned_to, Some(expected_assignee_id));
-                    assert_eq!(task.author_id, expected_author_id);
+                    assert_eq!(task.assigned_to, Some(expected_assignee_id_capture));
+                    assert_eq!(task.author_id, expected_author_id_capture);
                     true
                 }
             })
