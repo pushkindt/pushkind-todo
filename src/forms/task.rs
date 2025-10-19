@@ -133,15 +133,13 @@ impl AssigneeSelection {
 #[derive(Debug, Default, Deserialize)]
 pub struct AssigneeSelectionForm {
     #[serde(default, deserialize_with = "empty_string_as_none")]
-    pub id: Option<String>,
-    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub email: Option<String>,
 }
 
 impl AssigneeSelectionForm {
-    fn into_selection(self) -> Option<AssigneeSelection> {
+    pub(crate) fn into_selection(self) -> Option<AssigneeSelection> {
         match self.email {
             Some(email) => Some(AssigneeSelection {
                 name: self.name.unwrap_or_default(),

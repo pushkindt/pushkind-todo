@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Arc;
 
 use actix_files::Files;
 use actix_identity::IdentityMiddleware;
@@ -11,6 +12,7 @@ use pushkind_common::db::establish_connection_pool;
 use pushkind_common::middleware::RedirectUnauthorized;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{logout, not_assigned};
+use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
 use tera::Tera;
 
 use pushkind_todo::repository::DieselRepository;
@@ -28,6 +30,7 @@ async fn main() -> std::io::Result<()> {
     let port = env::var("PORT").unwrap_or("8080".to_string());
     let port = port.parse::<u16>().unwrap_or(8080);
     let address = env::var("ADDRESS").unwrap_or("127.0.0.1".to_string());
+    let zmq_address = env::var("ZMQ_EMAILER_PUB").unwrap_or("tcp://127.0.0.1:5557".to_string());
 
     let secret = env::var("SECRET_KEY");
     let secret_key = match &secret {
@@ -48,6 +51,15 @@ async fn main() -> std::io::Result<()> {
         secret: secret.unwrap_or_default(),
         auth_service_url,
     };
+
+    let zmq_sender = match ZmqSender::start(ZmqSenderOptions::pub_default(&zmq_address)) {
+        Ok(zmq_sender) => zmq_sender,
+        Err(e) => {
+            log::error!("Failed to start ZMQ sender: {e}");
+            std::process::exit(1);
+        }
+    };
+    let zmq_sender = Arc::new(zmq_sender);
 
     let domain = env::var("DOMAIN").unwrap_or("localhost".to_string());
 
@@ -101,6 +113,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(tera.clone()))
             .app_data(web::Data::new(repo.clone()))
             .app_data(web::Data::new(common_config.clone()))
+            .app_data(web::Data::new(zmq_sender.clone()))
     })
     .bind((address, port))?
     .run()

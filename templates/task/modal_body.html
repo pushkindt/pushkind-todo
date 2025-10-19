@@ -40,31 +40,8 @@
         </div>
     </div>
 
-    <div class="row mb-3">
-        <label for="user-add-form-id" class="col-md-2 col-form-label">Исполнитель</label>
-        <div class="col-md-10">
-            <div class="input-group">
-                <select class="form-control my-1" id="user-add-form-id" name="id" placeholder="Поиск исполнителя">
-                    <option></option>
-                    {% if assignee %}
-                        <option value="{{ assignee.email }}" selected>{{ assignee.name }}</option>
-                    {% endif %}
-                </select>
-            </div>
-            <div class="form-text">
-                {% if assignee %}
-                    <input type="hidden" id="user-name" name="name" required value="{{ assignee.name }}">
-                    <input type="hidden" id="user-email" name="email" required value="{{ assignee.email }}">
-                    Текущий исполнитель: {{ assignee.name }} ({{ assignee.email }}). Очистите поле, чтобы снять
-                    назначение.
-                {% else %}
-                    <input type="hidden" id="user-name" name="name" required>
-                    <input type="hidden" id="user-email" name="email" required>
-                    Укажите идентификатор пользователя, чтобы назначить задачу, или оставьте пустым.
-                {% endif %}
-            </div>
-        </div>
-    </div>
+     {{ macros::task_assignee(assignee=assignee) }}
+
     <div class="row mb-3">
         <div class="col">
             <button class="btn btn-primary" type="submit">Сохранить</button>
