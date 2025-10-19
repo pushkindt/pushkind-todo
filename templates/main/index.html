@@ -158,9 +158,17 @@
     document.addEventListener("DOMContentLoaded", () => {
 
         document.getElementById("user-add-form-id").addEventListener("change", function() {
+            const emailInput = document.getElementById("user-email");
+            const nameInput = document.getElementById("user-name");
             const selected = this.options[this.selectedIndex];
-            document.getElementById("user-email").value = selected.value;
-            document.getElementById("user-name").value = selected.text;
+
+            if (selected) {
+                emailInput.value = selected.value;
+                nameInput.value = selected.text;
+            } else {
+                emailInput.value = "";
+                nameInput.value = "";
+            }
         });
 
         let tomSelectInstance = new TomSelect('#user-add-form-id', {
