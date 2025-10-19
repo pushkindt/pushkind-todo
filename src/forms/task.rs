@@ -139,7 +139,7 @@ pub struct AssigneeSelectionForm {
 }
 
 impl AssigneeSelectionForm {
-    fn into_selection(self) -> Option<AssigneeSelection> {
+    pub(crate) fn into_selection(self) -> Option<AssigneeSelection> {
         match self.email {
             Some(email) => Some(AssigneeSelection {
                 name: self.name.unwrap_or_default(),

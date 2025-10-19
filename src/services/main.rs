@@ -6,7 +6,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::task::{Task, TaskStatus};
+use crate::domain::task::{NewTask, Task, TaskStatus};
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{ServiceError, ServiceResult};
@@ -168,13 +168,37 @@ where
     let new_user = user.into();
     let author = repo.create_or_update_user(&new_user)?;
 
-    let new_task = match form.into_new_task(user.hub_id, author.id) {
-        Some(task) => task,
+    let AddTaskForm {
+        title,
+        message,
+        assignee,
+    } = form;
+
+    let title = match title {
+        Some(value) => value,
         None => {
             log::error!("Validated task form missing title value");
             return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
         }
     };
+
+    let mut new_task = NewTask::new(user.hub_id, author.id, title);
+
+    if let Some(description) = message {
+        new_task = new_task.description(ammonia::clean(&description));
+    }
+
+    let assignee_user = match assignee.into_selection() {
+        Some(selection) => {
+            let new_user = selection.into_new_user(user.hub_id);
+            Some(repo.create_or_update_user(&new_user)?)
+        }
+        None => None,
+    };
+
+    if let Some(assignee) = assignee_user {
+        new_task = new_task.assign_to(assignee.id);
+    }
 
     let created = repo.create_task(&new_task).map_err(|err| {
         log::error!("Failed to add a task: {err}");
@@ -907,6 +931,106 @@ mod tests {
 
         assert_eq!(created.hub_id, expected_hub);
         assert_eq!(created.title, "alpha");
+    }
+
+    #[test]
+    fn add_task_assigns_to_selected_user() {
+        let mut repo = TaskWriterUserRepo::new();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let assignee_email = "assignee@example.com".to_string();
+        let assignee_name = "Assigned User".to_string();
+        let form = AddTaskForm {
+            title: Some("alpha".to_string()),
+            message: None,
+            assignee: AssigneeSelectionForm {
+                email: Some(assignee_email.clone()),
+                name: Some(assignee_name.clone()),
+            },
+        };
+
+        let expected_hub = user.hub_id;
+        let expected_email_lower = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(7, expected_hub, &expected_email_lower, &expected_name);
+        let expected_author_id = author.id;
+        let hub_for_return = expected_hub;
+
+        let assignee_record = sample_user_record(11, expected_hub, &assignee_email, &assignee_name);
+        let expected_assignee_id = assignee_record.id;
+
+        repo.user_reader.expect_get_user_by_email().never();
+
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(2)
+            .returning({
+                let expected_hub = expected_hub;
+                let expected_author_email = expected_email_lower.clone();
+                let expected_author_name = expected_name.clone();
+                let author_for_return = author.clone();
+                let expected_assignee_email = assignee_email.clone();
+                let expected_assignee_name = assignee_name.clone();
+                let assignee_for_return = assignee_record.clone();
+                move |new_user| {
+                    assert_eq!(new_user.hub_id, expected_hub);
+
+                    if new_user.email == expected_author_email {
+                        assert_eq!(new_user.name, expected_author_name);
+                        Ok(author_for_return.clone())
+                    } else if new_user.email == expected_assignee_email {
+                        assert_eq!(new_user.name, expected_assignee_name);
+                        Ok(assignee_for_return.clone())
+                    } else {
+                        panic!(
+                            "unexpected user payload received: {} / {}",
+                            new_user.email, new_user.name
+                        );
+                    }
+                }
+            });
+
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning(move |user_id, hub_id| {
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub);
+                Ok(())
+            });
+
+        repo.task_writer
+            .expect_create_task()
+            .times(1)
+            .withf({
+                let expected_hub = expected_hub;
+                let expected_author_id = expected_author_id;
+                let expected_assignee_id = expected_assignee_id;
+                move |task| {
+                    assert_eq!(task.hub_id, expected_hub);
+                    assert_eq!(task.title, "alpha");
+                    assert_eq!(task.description, None);
+                    assert_eq!(task.status, TaskStatus::Pending);
+                    assert!(task.due_date.is_none());
+                    assert_eq!(task.assigned_to, Some(expected_assignee_id));
+                    assert_eq!(task.author_id, expected_author_id);
+                    true
+                }
+            })
+            .returning(move |_| {
+                let mut task = sample_task(1, hub_for_return, "alpha");
+                task.assigned_to = Some(expected_assignee_id);
+                Ok(task)
+            });
+
+        let result = add_task(&repo, &user, form);
+
+        let created = match result {
+            Ok(value) => value,
+            Err(err) => panic!("expected success, got error: {err}"),
+        };
+
+        assert_eq!(created.hub_id, expected_hub);
+        assert_eq!(created.assigned_to, Some(expected_assignee_id));
     }
 
     #[test]
