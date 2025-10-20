@@ -333,11 +333,9 @@ where
 
     if let Some(email) =
         build_task_updated_email(&updated, author_user.as_ref(), assignee_user.as_ref(), user)
-    {
-        if let Err(err) = notifications::queue_email(zmq_sender, user, email) {
+        && let Err(err) = notifications::queue_email(zmq_sender, user, email) {
             log::error!("Failed to queue task-updated email: {err}");
         }
-    }
 
     Ok(updated)
 }
