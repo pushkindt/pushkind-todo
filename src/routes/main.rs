@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use actix_multipart::form::MultipartForm;
 use actix_web::{HttpResponse, Responder, get, post, web};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
+use pushkind_common::zmq::ZmqSender;
 use tera::Tera;
 
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
@@ -52,9 +55,11 @@ pub async fn show_index(
 pub async fn add_task(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
+    zmq_sender: web::Data<Arc<ZmqSender>>,
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
-    match main_service::add_task(repo.get_ref(), &user, form) {
+    let zmq_sender = zmq_sender.get_ref().as_ref();
+    match main_service::add_task(repo.get_ref(), zmq_sender, &user, form) {
         Ok(_) => {
             FlashMessage::success("Задача добавлена.").send();
             redirect("/")

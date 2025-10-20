@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use actix_web::{HttpResponse, Responder, get, post, web};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
+use pushkind_common::zmq::ZmqSender;
 use tera::{Context, Tera};
 
 use crate::forms::task::{NewTaskCommentForm, UpdateTaskForm};
@@ -80,6 +83,7 @@ pub async fn update_task(
     task_id: web::Path<i32>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
+    zmq_sender: web::Data<Arc<ZmqSender>>,
     web::Form(form): web::Form<UpdateTaskForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();

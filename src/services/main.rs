@@ -2,6 +2,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::check_role;
+use pushkind_common::zmq::ZmqSenderExt;
 use serde::Deserialize;
 use validator::Validate;
 
@@ -148,9 +149,15 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 }
 
 /// Validates the add-task form and persists a new task record.
-pub fn add_task<R>(repo: &R, user: &AuthenticatedUser, form: AddTaskForm) -> ServiceResult<Task>
+pub fn add_task<R, Z>(
+    repo: &R,
+    zmq_sender: &Z,
+    user: &AuthenticatedUser,
+    form: AddTaskForm,
+) -> ServiceResult<Task>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
+    Z: ZmqSenderExt,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
