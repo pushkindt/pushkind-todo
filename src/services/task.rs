@@ -334,7 +334,9 @@ where
     if let Some(email) =
         build_task_updated_email(&updated, author_user.as_ref(), assignee_user.as_ref(), user)
     {
-        notifications::queue_email(zmq_sender, user, email)?;
+        if let Err(err) = notifications::queue_email(zmq_sender, user, email) {
+            log::error!("Failed to queue task-updated email: {err}");
+        }
     }
 
     Ok(updated)
@@ -497,10 +499,11 @@ fn build_task_updated_email(
     }
 
     if let Some(description) = &task.description
-        && !description.trim().is_empty() {
-            message.push_str("<hr>");
-            message.push_str(description);
-        }
+        && !description.trim().is_empty()
+    {
+        message.push_str("<hr>");
+        message.push_str(description);
+    }
 
     Some(NewEmail {
         message,

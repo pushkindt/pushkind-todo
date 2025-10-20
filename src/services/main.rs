@@ -209,9 +209,12 @@ where
     })?;
 
     if let Some(assignee) = assignee_user.as_ref()
-        && let Some(email) = build_task_created_email(&created, &author, assignee, user) {
-            notifications::queue_email(zmq_sender, user, email)?;
+        && let Some(email) = build_task_created_email(&created, &author, assignee, user)
+    {
+        if let Err(err) = notifications::queue_email(zmq_sender, user, email) {
+            log::error!("Failed to queue task-created email: {err}");
         }
+    }
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
@@ -275,10 +278,11 @@ fn build_task_created_email(
     );
 
     if let Some(description) = &task.description
-        && !description.trim().is_empty() {
-            message.push_str("<hr>");
-            message.push_str(description);
-        }
+        && !description.trim().is_empty()
+    {
+        message.push_str("<hr>");
+        message.push_str(description);
+    }
 
     let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee");
 
