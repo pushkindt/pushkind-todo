@@ -262,6 +262,7 @@ mod tests {
     use crate::forms::task::AssigneeSelectionForm;
     use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
     use crate::repository::{TaskWriter, UserListQuery, UserReader, UserWriter};
+    use crate::services::mock::MockZmqSender;
 
     use std::io::Write;
 
@@ -825,6 +826,7 @@ mod tests {
     #[test]
     fn add_task_returns_unauthorized_when_role_missing() {
         let repo = TaskWriterUserRepo::new();
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
@@ -832,7 +834,7 @@ mod tests {
             assignee: assignee_selection_form_none(),
         };
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -840,6 +842,7 @@ mod tests {
     #[test]
     fn add_task_returns_form_error_on_validation_failure() {
         let repo = TaskWriterUserRepo::new();
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some(String::new()),
@@ -847,7 +850,7 @@ mod tests {
             assignee: assignee_selection_form_none(),
         };
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         match result {
             Err(ServiceError::Form(message)) => {
@@ -860,6 +863,7 @@ mod tests {
     #[test]
     fn add_task_persists_new_record_on_success() {
         let mut repo = TaskWriterUserRepo::new();
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
@@ -914,7 +918,7 @@ mod tests {
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         let created = match result {
             Ok(value) => value,
@@ -1014,7 +1018,7 @@ mod tests {
                 Ok(task)
             });
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         let created = match result {
             Ok(value) => value,
@@ -1077,7 +1081,7 @@ mod tests {
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         assert!(result.is_ok(), "expected task creation to succeed");
     }
@@ -1085,6 +1089,7 @@ mod tests {
     #[test]
     fn add_task_propagates_repository_errors() {
         let mut repo = TaskWriterUserRepo::new();
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
@@ -1126,7 +1131,7 @@ mod tests {
             })
             .returning(|_| Err(RepositoryError::Unexpected("db write failed".to_string())));
 
-        let result = add_task(&repo, &user, form);
+        let result = add_task(&repo, &zmq, &user, form);
 
         match result {
             Err(ServiceError::Repository(RepositoryError::Unexpected(message))) => {

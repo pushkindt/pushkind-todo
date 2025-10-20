@@ -510,6 +510,7 @@ mod tests {
         MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
     };
     use crate::repository::{TaskListQuery, UserListQuery};
+    use crate::services::mock::MockZmqSender;
     use mockall::Sequence;
 
     struct TaskDetailsRepo {
@@ -1182,6 +1183,7 @@ mod tests {
         let assignee = sample_user(7, 1, "Executor", "executor@example.com");
         let task = sample_task(42, 1, None, 3);
         let repo = UpdateRepo::new(task, vec![assignee.clone()]);
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let due_date = NaiveDate::from_ymd_opt(2024, 5, 1).expect("valid date");
@@ -1196,7 +1198,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(&repo, &user, 42, form).expect("should update task");
+        let outcome = update_task(&repo, &zmq, &user, 42, form).expect("should update task");
 
         assert_eq!(outcome.id, 42);
         assert_eq!(outcome.title, "Updated title");
@@ -1260,6 +1262,7 @@ mod tests {
     fn update_task_creates_user_when_missing() {
         let task = sample_task(7, 1, None, 2);
         let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1271,7 +1274,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        update_task(&repo, &user, 7, form).expect("should create assignee");
+        update_task(&repo, &zmq, &user, 7, form).expect("should create assignee");
 
         let stored = repo.task.borrow().clone();
         let created = repo
@@ -1322,6 +1325,7 @@ mod tests {
         let assignee = sample_user(8, 1, "Assigned", "assigned@example.com");
         let task = sample_task(9, 1, Some(assignee.id), 4);
         let repo = UpdateRepo::new(task, vec![assignee.clone()]);
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1330,7 +1334,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        update_task(&repo, &user, 9, form).expect("should unassign");
+        update_task(&repo, &zmq, &user, 9, form).expect("should unassign");
 
         let stored = repo.task.borrow().clone();
         assert!(stored.assigned_to.is_none());
@@ -1376,6 +1380,7 @@ mod tests {
     fn update_task_requires_email_for_assignee() {
         let task = sample_task(11, 1, None, 5);
         let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1386,7 +1391,8 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(&repo, &user, 11, form).expect("expected update to succeed");
+        let outcome =
+            update_task(&repo, &zmq, &user, 11, form).expect("expected update to succeed");
 
         assert_eq!(outcome.id, 11);
         assert_eq!(outcome.title, "Updated");
@@ -1407,6 +1413,7 @@ mod tests {
     fn update_task_requires_role() {
         let task = sample_task(12, 1, None, 6);
         let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1415,7 +1422,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let result = update_task(&repo, &user, 12, form);
+        let result = update_task(&repo, &zmq, &user, 12, form);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1424,6 +1431,7 @@ mod tests {
     fn update_task_returns_not_found_for_missing_task() {
         let task = sample_task(13, 2, None, 6);
         let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1432,7 +1440,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let result = update_task(&repo, &user, 13, form);
+        let result = update_task(&repo, &zmq, &user, 13, form);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
