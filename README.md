@@ -31,6 +31,9 @@ of Actix Web, Diesel, and Tera and integrates tightly with the shared
   messages.
 - **JSON task feed** – The `/v1/tasks` endpoint exposes the same filtered task
   list over JSON for integrations that need a machine-readable snapshot.
+- **Email notifications** – The service publishes a ZeroMQ message for email
+  delivery whenever a task is created or a task event occurs, notifying the
+  assignee while skipping notifications to the actor who performed the event.
 
 ## Pages
 
