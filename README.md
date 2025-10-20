@@ -6,6 +6,9 @@ creating, assigning, and tracking work. The project is implemented in Rust on to
 of Actix Web, Diesel, and Tera and integrates tightly with the shared
 `pushkind-common` crate for authentication, configuration, and reusable UI helpers.
 
+Comprehensive API documentation generated with `cargo doc` is published at
+[pushkindt.github.io/pushkind-todo](https://pushkindt.github.io/pushkind-todo/).
+
 ## Features
 
 - **Role-locked task dashboard** – Authenticated hub members who hold
