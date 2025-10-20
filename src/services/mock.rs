@@ -1,4 +1,4 @@
-use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderExt, ZmqSenderTrait};
+use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderTrait};
 
 /// Lightweight mock implementation of the [`ZmqSenderTrait`] used in unit tests.
 ///
@@ -24,5 +24,3 @@ impl ZmqSenderTrait for MockZmqSender {
         Box::pin(async { Ok(()) })
     }
 }
-
-impl ZmqSenderExt for MockZmqSender {}

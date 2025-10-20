@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn add_task_returns_unauthorized_when_role_missing() {
         let repo = TaskWriterUserRepo::new();
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
@@ -842,7 +842,7 @@ mod tests {
     #[test]
     fn add_task_returns_form_error_on_validation_failure() {
         let repo = TaskWriterUserRepo::new();
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some(String::new()),
@@ -863,7 +863,7 @@ mod tests {
     #[test]
     fn add_task_persists_new_record_on_success() {
         let mut repo = TaskWriterUserRepo::new();
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
@@ -1018,6 +1018,7 @@ mod tests {
                 Ok(task)
             });
 
+        let zmq = MockZmqSender {};
         let result = add_task(&repo, &zmq, &user, form);
 
         let created = match result {
@@ -1081,6 +1082,7 @@ mod tests {
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
+        let zmq = MockZmqSender {};
         let result = add_task(&repo, &zmq, &user, form);
 
         assert!(result.is_ok(), "expected task creation to succeed");
@@ -1089,7 +1091,7 @@ mod tests {
     #[test]
     fn add_task_propagates_repository_errors() {
         let mut repo = TaskWriterUserRepo::new();
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
             title: Some("alpha".to_string()),

@@ -1183,7 +1183,7 @@ mod tests {
         let assignee = sample_user(7, 1, "Executor", "executor@example.com");
         let task = sample_task(42, 1, None, 3);
         let repo = UpdateRepo::new(task, vec![assignee.clone()]);
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let due_date = NaiveDate::from_ymd_opt(2024, 5, 1).expect("valid date");
@@ -1262,7 +1262,7 @@ mod tests {
     fn update_task_creates_user_when_missing() {
         let task = sample_task(7, 1, None, 2);
         let repo = UpdateRepo::new(task, Vec::new());
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1325,7 +1325,7 @@ mod tests {
         let assignee = sample_user(8, 1, "Assigned", "assigned@example.com");
         let task = sample_task(9, 1, Some(assignee.id), 4);
         let repo = UpdateRepo::new(task, vec![assignee.clone()]);
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1380,7 +1380,7 @@ mod tests {
     fn update_task_requires_email_for_assignee() {
         let task = sample_task(11, 1, None, 5);
         let repo = UpdateRepo::new(task, Vec::new());
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1413,7 +1413,7 @@ mod tests {
     fn update_task_requires_role() {
         let task = sample_task(12, 1, None, 6);
         let repo = UpdateRepo::new(task, Vec::new());
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -1431,7 +1431,7 @@ mod tests {
     fn update_task_returns_not_found_for_missing_task() {
         let task = sample_task(13, 2, None, 6);
         let repo = UpdateRepo::new(task, Vec::new());
-        let zmq = MockZmqSender::default();
+        let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
