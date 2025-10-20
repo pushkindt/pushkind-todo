@@ -375,8 +375,7 @@ where
         assignee_user.as_ref(),
         &event_actors,
         user,
-    )
-        && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    ) && let Err(err) = notifications::queue_email(zmq_sender, user, email)
     {
         log::error!("Failed to queue task-updated email: {err}");
     }
@@ -659,9 +658,10 @@ where
     let mut event_actor_ids = HashSet::new();
     for event in task_events {
         if let Some(user_id) = event.user_id
-            && user_id != comment_author.id {
-                event_actor_ids.insert(user_id);
-            }
+            && user_id != comment_author.id
+        {
+            event_actor_ids.insert(user_id);
+        }
     }
 
     for actor_id in event_actor_ids {
@@ -1409,8 +1409,8 @@ mod tests {
                 .events
                 .borrow()
                 .iter()
-                .cloned()
-                .find(|event| event.id == id))
+                .find(|&event| event.id == id)
+                .cloned())
         }
     }
 
