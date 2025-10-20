@@ -1,8 +1,8 @@
 use chrono::{Duration, NaiveDate};
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_todo::domain::task::{
-    NewTask as DomainNewTask, TaskAssignment as DomainTaskAssignment, TaskListFilters, TaskStatus,
-    UpdateTask as DomainUpdateTask,
+    NewTask as DomainNewTask, TaskAssignment as DomainTaskAssignment, TaskListFilters,
+    TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
 };
 use pushkind_todo::domain::task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType};
 use pushkind_todo::domain::user::{NewUser as DomainNewUser, UpdateUser as DomainUpdateUser};
@@ -225,6 +225,10 @@ fn test_task_repository_crud() {
     assert_eq!(alpha.title, "Alpha Task");
     assert_eq!(beta.status, TaskStatus::InProgress);
     assert_eq!(beta.assigned_to, Some(assignee.id));
+    assert!(alpha.track.is_none());
+    assert!(beta.track.is_none());
+    assert_eq!(alpha.priority, TaskPriority::Middle);
+    assert_eq!(beta.priority, TaskPriority::Middle);
 
     assert!(
         repo.get_task_by_id(alpha.id, 2)

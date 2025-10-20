@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::domain::task::{
     NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
-    TaskStatus, UpdateTask as DomainUpdateTask,
+    TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
 };
 
 use super::user::User;
@@ -17,6 +17,8 @@ pub struct Task {
     pub hub_id: i32,
     pub title: String,
     pub description: Option<String>,
+    pub track: Option<String>,
+    pub priority: String,
     pub status: String,
     pub due_date: Option<NaiveDate>,
     pub assigned_to: Option<i32>,
@@ -32,6 +34,8 @@ pub struct NewTask<'a> {
     pub hub_id: i32,
     pub title: &'a str,
     pub description: Option<&'a str>,
+    pub track: Option<&'a str>,
+    pub priority: &'a str,
     pub status: &'a str,
     pub due_date: Option<NaiveDate>,
     pub assigned_to: Option<i32>,
@@ -47,6 +51,8 @@ pub struct NewTask<'a> {
 pub struct UpdateTask<'a> {
     pub title: &'a str,
     pub description: Option<&'a str>,
+    pub track: Option<&'a str>,
+    pub priority: &'a str,
     pub status: &'a str,
     pub due_date: Option<NaiveDate>,
     pub assigned_to: Option<i32>,
@@ -79,6 +85,8 @@ pub struct NewTaskAssignment {
 pub enum TaskModelError {
     #[error("Unknown task status '{status}'")]
     UnknownStatus { status: String },
+    #[error("Unknown task priority '{priority}'")]
+    UnknownPriority { priority: String },
 }
 
 impl From<Task> for DomainTask {
@@ -88,6 +96,8 @@ impl From<Task> for DomainTask {
             hub_id,
             title,
             description,
+            track,
+            priority: priority_text,
             status: status_text,
             due_date,
             assigned_to,
@@ -108,11 +118,24 @@ impl From<Task> for DomainTask {
             }
         };
 
+        let priority = {
+            let candidate = TaskPriority::from(priority_text.as_str());
+            let canonical: &'static str = candidate.into();
+            if canonical == priority_text.as_str() {
+                candidate
+            } else {
+                log::warn!("Failed to decode task priority '{}'", priority_text);
+                TaskPriority::default()
+            }
+        };
+
         Self {
             id,
             hub_id,
             title,
             description,
+            track,
+            priority,
             status,
             due_date,
             assigned_to,
@@ -131,7 +154,9 @@ impl Task {
             hub_id,
             title,
             description,
+            track,
             status: raw_status,
+            priority: raw_priority,
             due_date,
             assigned_to,
             author_id,
@@ -146,11 +171,21 @@ impl Task {
             return Err(TaskModelError::UnknownStatus { status: raw_status });
         }
 
+        let priority = TaskPriority::from(raw_priority.as_str());
+        let canonical_priority: &'static str = priority.into();
+        if canonical_priority != raw_priority.as_str() {
+            return Err(TaskModelError::UnknownPriority {
+                priority: raw_priority,
+            });
+        }
+
         Ok(DomainTask {
             id,
             hub_id,
             title,
             description,
+            track,
+            priority,
             status,
             due_date,
             assigned_to,
@@ -168,6 +203,8 @@ impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
             hub_id: value.hub_id,
             title: value.title.as_str(),
             description: value.description.as_deref(),
+            track: value.track.as_deref(),
+            priority: <&'static str>::from(value.priority),
             status: <&'static str>::from(value.status),
             due_date: value.due_date,
             assigned_to: value.assigned_to,
@@ -184,6 +221,8 @@ impl<'a> From<&'a DomainUpdateTask> for UpdateTask<'a> {
         Self {
             title: value.title.as_str(),
             description: value.description.as_deref(),
+            track: value.track.as_deref(),
+            priority: <&'static str>::from(value.priority),
             status: <&'static str>::from(value.status),
             due_date: value.due_date,
             assigned_to: value.assigned_to,

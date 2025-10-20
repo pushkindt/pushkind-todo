@@ -451,6 +451,28 @@ fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
         );
     }
 
+    if current.track != updated.track {
+        changes.insert(
+            "track".to_string(),
+            json!({
+                "from": current.track.clone(),
+                "to": updated.track.clone(),
+            }),
+        );
+    }
+
+    if current.priority != updated.priority {
+        let from_priority: &'static str = current.priority.into();
+        let to_priority: &'static str = updated.priority.into();
+        changes.insert(
+            "priority".to_string(),
+            json!({
+                "from": from_priority,
+                "to": to_priority,
+            }),
+        );
+    }
+
     if current.due_date != updated.due_date {
         changes.insert(
             "due_date".to_string(),
@@ -772,7 +794,8 @@ mod tests {
 
     use crate::domain::{
         task::{
-            NewTask as DomainNewTask, TaskAssignment, TaskStatus, UpdateTask as DomainUpdateTask,
+            NewTask as DomainNewTask, TaskAssignment, TaskPriority, TaskStatus,
+            UpdateTask as DomainUpdateTask,
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
         user::User,
@@ -962,6 +985,8 @@ mod tests {
             hub_id,
             title: "Test Task".to_string(),
             description: Some("Detail".to_string()),
+            track: Some("Default Track".to_string()),
+            priority: TaskPriority::default(),
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to,
@@ -1065,13 +1090,20 @@ mod tests {
         updated.title = "Updated".to_string();
         updated.description = Some("New".to_string());
         updated.due_date = Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap());
+        updated.track = Some("Updated Track".to_string());
+        updated.priority = TaskPriority::High;
 
         let payload =
             metadata_event_payload(&current, &updated).expect("expected metadata payload");
 
+        let from_priority: &'static str = current.priority.into();
+        let to_priority: &'static str = updated.priority.into();
+
         let expected = json!({
             "title": {"from": current.title.clone(), "to": updated.title.clone()},
             "description": {"from": current.description.clone(), "to": updated.description.clone()},
+            "track": {"from": current.track.clone(), "to": updated.track.clone()},
+            "priority": {"from": from_priority, "to": to_priority},
             "due_date": {
                 "from": current.due_date.map(|date| date.to_string()),
                 "to": updated.due_date.map(|date| date.to_string())

@@ -310,8 +310,8 @@ mod tests {
 
     use crate::SERVICE_ACCESS_ROLE;
     use crate::domain::task::{
-        NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskStatus,
-        UpdateTask as DomainUpdateTask,
+        NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskPriority,
+        TaskStatus, UpdateTask as DomainUpdateTask,
     };
     use crate::domain::user::User;
     use crate::forms::task::AssigneeSelectionForm;
@@ -335,6 +335,8 @@ mod tests {
             hub_id,
             title: title.to_string(),
             description: None,
+            track: None,
+            priority: TaskPriority::Middle,
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: None,
@@ -1184,6 +1186,8 @@ mod tests {
             hub_id: expected_hub,
             title: "New Task".to_string(),
             description: Some("Task details".to_string()),
+            track: None,
+            priority: TaskPriority::Middle,
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: Some(assignee_record.id),

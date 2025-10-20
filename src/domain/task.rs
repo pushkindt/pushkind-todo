@@ -29,6 +29,43 @@ impl TaskStatus {
     }
 }
 
+/// Priority assigned to a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskPriority {
+    /// Task is low priority and can be handled after other work.
+    Low,
+    /// Task is middle priority and should be addressed in a timely manner.
+    Middle,
+    /// Task is high priority and requires immediate attention.
+    High,
+}
+
+impl Default for TaskPriority {
+    fn default() -> Self {
+        Self::Middle
+    }
+}
+
+impl From<TaskPriority> for &'static str {
+    fn from(value: TaskPriority) -> Self {
+        match value {
+            TaskPriority::Low => "Low",
+            TaskPriority::Middle => "Middle",
+            TaskPriority::High => "High",
+        }
+    }
+}
+
+impl From<&str> for TaskPriority {
+    fn from(value: &str) -> Self {
+        match value {
+            "Low" => TaskPriority::Low,
+            "High" => TaskPriority::High,
+            _ => TaskPriority::Middle,
+        }
+    }
+}
+
 /// Domain representation of a task managed by the service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -40,6 +77,10 @@ pub struct Task {
     pub title: String,
     /// Optional detailed description for additional context.
     pub description: Option<String>,
+    /// Optional track categorization that the task belongs to.
+    pub track: Option<String>,
+    /// Priority level assigned to the task.
+    pub priority: TaskPriority,
     /// Current status for the task.
     pub status: TaskStatus,
     /// Optional due date for completing the task.
@@ -72,6 +113,10 @@ pub struct NewTask {
     pub title: String,
     /// Optional description providing more context.
     pub description: Option<String>,
+    /// Optional track categorization that the task belongs to.
+    pub track: Option<String>,
+    /// Priority level for the task.
+    pub priority: TaskPriority,
     /// Desired status for the task upon creation.
     pub status: TaskStatus,
     /// Optional due date.
@@ -94,6 +139,8 @@ impl NewTask {
             hub_id,
             title: title.into(),
             description: None,
+            track: None,
+            priority: TaskPriority::default(),
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: None,
@@ -106,6 +153,24 @@ impl NewTask {
     /// Set a description for the task.
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Set a track for the task.
+    pub fn track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(track.into());
+        self
+    }
+
+    /// Remove the track information from the task.
+    pub fn clear_track(mut self) -> Self {
+        self.track = None;
+        self
+    }
+
+    /// Set the priority for the task.
+    pub fn priority(mut self, priority: TaskPriority) -> Self {
+        self.priority = priority;
         self
     }
 
@@ -264,6 +329,10 @@ pub struct UpdateTask {
     pub title: String,
     /// New description content for the task.
     pub description: Option<String>,
+    /// Updated track information for the task.
+    pub track: Option<String>,
+    /// Updated priority value.
+    pub priority: TaskPriority,
     /// Updated status value.
     pub status: TaskStatus,
     /// Updated due date for the task.
@@ -282,6 +351,8 @@ impl UpdateTask {
         Self {
             title: task.title.clone(),
             description: task.description.clone(),
+            track: task.track.clone(),
+            priority: task.priority,
             status: task.status,
             due_date: task.due_date,
             assigned_to: task.assigned_to,
@@ -312,6 +383,27 @@ impl UpdateTask {
     pub fn clear_description(mut self) -> Self {
         self.touch();
         self.description = None;
+        self
+    }
+
+    /// Update the track for the task.
+    pub fn track(mut self, track: impl Into<String>) -> Self {
+        self.touch();
+        self.track = Some(track.into());
+        self
+    }
+
+    /// Remove the track information from the task.
+    pub fn clear_track(mut self) -> Self {
+        self.touch();
+        self.track = None;
+        self
+    }
+
+    /// Update the priority level for the task.
+    pub fn priority(mut self, priority: TaskPriority) -> Self {
+        self.touch();
+        self.priority = priority;
         self
     }
 

@@ -27,6 +27,8 @@ diesel::table! {
         hub_id -> Integer,
         title -> Text,
         description -> Nullable<Text>,
+        track -> Nullable<Text>,
+        priority -> Text,
         status -> Text,
         due_date -> Nullable<Date>,
         assigned_to -> Nullable<Integer>,
