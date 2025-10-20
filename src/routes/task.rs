@@ -118,11 +118,13 @@ pub async fn add_task_comment(
     task_id: web::Path<i32>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
+    zmq_sender: web::Data<Arc<ZmqSender>>,
     web::Form(form): web::Form<NewTaskCommentForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
+    let zmq_sender = zmq_sender.get_ref().as_ref();
 
-    match task_service::add_task_comment(repo.get_ref(), &user, task_id, form) {
+    match task_service::add_task_comment(repo.get_ref(), zmq_sender, &user, task_id, form) {
         Ok(_) => {
             FlashMessage::success("Комментарий добавлен.").send();
             redirect(&format!("/task/{}", task_id))

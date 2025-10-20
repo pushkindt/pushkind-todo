@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::domain::emailer::email::NewEmail;
+use pushkind_common::domain::emailer::email::{NewEmail, NewEmailRecipient};
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
@@ -187,7 +187,13 @@ pub fn update_task<R, Z>(
     form: UpdateTaskForm,
 ) -> ServiceResult<Task>
 where
-    R: TaskReader + TaskWriter + TaskEventWriter + UserReader + UserWriter + ?Sized,
+    R: TaskReader
+        + TaskWriter
+        + TaskEventReader
+        + TaskEventWriter
+        + UserReader
+        + UserWriter
+        + ?Sized,
     Z: ZmqSenderExt,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
@@ -331,11 +337,48 @@ where
         None => None,
     };
 
-    if let Some(email) =
-        build_task_updated_email(&updated, author_user.as_ref(), assignee_user.as_ref(), user)
-        && let Err(err) = notifications::queue_email(zmq_sender, user, email) {
-            log::error!("Failed to queue task-updated email: {err}");
+    let event_actors = {
+        let mut actors = Vec::new();
+        let mut seen_actor_ids = HashSet::new();
+
+        let events = repo
+            .list_events_for_task(updated.id, user.hub_id)
+            .map_err(ServiceError::from)?;
+
+        for event in events {
+            if let Some(actor_id) = event.user_id {
+                if !seen_actor_ids.insert(actor_id) {
+                    continue;
+                }
+
+                match repo.get_user_by_id(actor_id, user.hub_id) {
+                    Ok(Some(actor)) => actors.push(actor),
+                    Ok(None) => {
+                        log::warn!(
+                            "Task {} event {} references missing actor {}",
+                            updated.id,
+                            event.id,
+                            actor_id
+                        );
+                    }
+                    Err(err) => return Err(ServiceError::from(err)),
+                }
+            }
         }
+
+        actors
+    };
+
+    if let Some(email) = build_task_updated_email(
+        &updated,
+        author_user.as_ref(),
+        assignee_user.as_ref(),
+        &event_actors,
+        user,
+    ) && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    {
+        log::error!("Failed to queue task-updated email: {err}");
+    }
 
     Ok(updated)
 }
@@ -439,6 +482,7 @@ fn build_task_updated_email(
     task: &Task,
     author: Option<&User>,
     assignee: Option<&User>,
+    event_actors: &[User],
     actor: &AuthenticatedUser,
 ) -> Option<NewEmail> {
     let actor_email = actor.email.trim().to_lowercase();
@@ -468,6 +512,18 @@ fn build_task_updated_email(
                 assignee,
                 "task_updated",
                 "assignee",
+            ));
+        }
+    }
+
+    for event_actor in event_actors {
+        let email = event_actor.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                task,
+                event_actor,
+                "task_updated",
+                "event_actor",
             ));
         }
     }
@@ -515,14 +571,16 @@ fn build_task_updated_email(
 }
 
 /// Record a new comment on the specified task from the current user.
-pub fn add_task_comment<R>(
+pub fn add_task_comment<R, Z>(
     repo: &R,
+    zmq_sender: &Z,
     user: &AuthenticatedUser,
     task_id: i32,
     form: NewTaskCommentForm,
 ) -> ServiceResult<TaskEvent>
 where
-    R: TaskReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
+    R: TaskReader + TaskEventReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
+    Z: ZmqSenderExt,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
@@ -533,26 +591,138 @@ where
         return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
     }
 
-    repo.get_task_by_id(task_id, user.hub_id)
+    let task = repo
+        .get_task_by_id(task_id, user.hub_id)
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
     let new_user = user.into();
-    let author = repo.create_or_update_user(&new_user)?;
+    let comment_author = repo.create_or_update_user(&new_user)?;
 
     let submission = form.into_submission();
+    let comment_text = submission.text;
     let event = NewTaskEvent::new(
         task_id,
-        Some(author.id),
+        Some(comment_author.id),
         TaskEventType::Comment,
-        json!({ "text": submission.text }),
+        json!({ "text": comment_text.clone() }),
     );
 
     let recorded = repo.record_event(&event).map_err(ServiceError::from)?;
 
-    repo.touch_visited_at(author.id, author.hub_id)?;
+    repo.touch_visited_at(comment_author.id, comment_author.hub_id)?;
+
+    let task_author = repo
+        .get_user_by_id(task.author_id, user.hub_id)
+        .map_err(ServiceError::from)?;
+
+    let task_assignee = match task.assigned_to {
+        Some(assignee_id) => repo
+            .get_user_by_id(assignee_id, user.hub_id)
+            .map_err(ServiceError::from)?,
+        None => None,
+    };
+
+    let task_events = repo
+        .list_events_for_task(task.id, user.hub_id)
+        .map_err(ServiceError::from)?;
+
+    let actor_email = comment_author.email.trim().to_lowercase();
+    let mut seen = HashSet::new();
+    let mut recipients = Vec::new();
+
+    if let Some(author) = task_author {
+        let email = author.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                &task,
+                &author,
+                "task_commented",
+                "author",
+            ));
+        }
+    }
+
+    if let Some(assignee) = task_assignee {
+        let email = assignee.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                &task,
+                &assignee,
+                "task_commented",
+                "assignee",
+            ));
+        }
+    }
+
+    let mut event_actor_ids = HashSet::new();
+    for event in task_events {
+        if let Some(user_id) = event.user_id
+            && user_id != comment_author.id
+        {
+            event_actor_ids.insert(user_id);
+        }
+    }
+
+    for actor_id in event_actor_ids {
+        if let Some(actor) = repo
+            .get_user_by_id(actor_id, user.hub_id)
+            .map_err(ServiceError::from)?
+        {
+            let email = actor.email.trim().to_lowercase();
+            if email != actor_email && seen.insert(email.clone()) {
+                recipients.push(notifications::task_recipient(
+                    &task,
+                    &actor,
+                    "task_commented",
+                    "event_actor",
+                ));
+            }
+        }
+    }
+
+    if let Some(email) = build_task_comment_email(&task, &comment_author, &comment_text, recipients)
+        && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    {
+        log::error!("Failed to queue task-comment email: {err}");
+    }
 
     Ok(recorded)
+}
+
+fn build_task_comment_email(
+    task: &Task,
+    comment_author: &User,
+    comment_body: &str,
+    recipients: Vec<NewEmailRecipient>,
+) -> Option<NewEmail> {
+    if recipients.is_empty() {
+        return None;
+    }
+
+    let sanitized_title = notifications::sanitize_text(&task.title);
+    let sanitized_author = notifications::sanitize_text(&comment_author.name);
+    let sanitized_body = notifications::sanitize_text(comment_body);
+
+    let mut message = format!(
+        "<p>Пользователь {} ({}) оставил комментарий к задаче <strong>{}</strong>.</p>",
+        sanitized_author, comment_author.email, sanitized_title
+    );
+
+    if !sanitized_body.is_empty() {
+        message.push_str("<hr>");
+        message.push_str(&sanitized_body);
+    }
+
+    Some(NewEmail {
+        message,
+        subject: Some(format!("Новый комментарий в задаче: {}", sanitized_title)),
+        attachment: None,
+        attachment_name: None,
+        attachment_mime: None,
+        hub_id: comment_author.hub_id,
+        recipients,
+    })
 }
 
 fn assignment_event_user(user: &User) -> Value {
@@ -1215,6 +1385,35 @@ mod tests {
         }
     }
 
+    impl TaskEventReader for UpdateRepo {
+        fn list_events_for_task(
+            &self,
+            task_id: i32,
+            hub_id: i32,
+        ) -> RepositoryResult<Vec<TaskEvent>> {
+            let task = self.task.borrow();
+            if task.id != task_id || task.hub_id != hub_id {
+                return Ok(Vec::new());
+            }
+
+            Ok(self.events.borrow().clone())
+        }
+
+        fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>> {
+            let task = self.task.borrow();
+            if task.hub_id != hub_id {
+                return Ok(None);
+            }
+
+            Ok(self
+                .events
+                .borrow()
+                .iter()
+                .find(|&event| event.id == id)
+                .cloned())
+        }
+    }
+
     impl UserReader for UpdateRepo {
         fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>> {
             Ok(self
@@ -1398,8 +1597,15 @@ mod tests {
     fn update_task_notifies_participants() {
         let author = sample_user(3, 1, "Author", "author@example.com");
         let assignee = sample_user(5, 1, "Executor", "executor@example.com");
+        let commenter = sample_user(7, 1, "Commenter", "commenter@example.com");
         let task = sample_task(55, 1, Some(assignee.id), author.id);
-        let repo = UpdateRepo::new(task.clone(), vec![author.clone(), assignee.clone()]);
+        let repo = UpdateRepo::new(
+            task.clone(),
+            vec![author.clone(), assignee.clone(), commenter.clone()],
+        );
+        repo.events
+            .borrow_mut()
+            .push(sample_event(77, task.id, Some(commenter.id)));
         let zmq = RecordingZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
@@ -1427,7 +1633,7 @@ mod tests {
             ZMQSendEmailMessage::NewEmail(message) => {
                 let (actor, email) = *message;
                 assert_eq!(actor.email, user.email);
-                assert_eq!(email.recipients.len(), 2);
+                assert_eq!(email.recipients.len(), 3);
 
                 let addresses: std::collections::HashSet<_> = email
                     .recipients
@@ -1437,6 +1643,7 @@ mod tests {
 
                 assert!(addresses.contains(author.email.as_str()));
                 assert!(addresses.contains(assignee.email.as_str()));
+                assert!(addresses.contains(commenter.email.as_str()));
                 assert_eq!(
                     email.subject.as_deref(),
                     Some("Обновление задачи: Updated title"),
@@ -1641,12 +1848,14 @@ mod tests {
         let task = sample_task(77, 1, None, commenter.id);
         let repo = UpdateRepo::new(task.clone(), vec![commenter.clone()]);
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let zmq = MockZmqSender {};
 
         let form = NewTaskCommentForm {
             message: "Новый комментарий".to_string(),
         };
 
-        let recorded = add_task_comment(&repo, &user, task.id, form).expect("should add comment");
+        let recorded =
+            add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
         assert_eq!(recorded.task_id, task.id);
         assert_eq!(recorded.event_type, TaskEventType::Comment);
         assert_eq!(recorded.event_data, json!({"text": "Новый комментарий"}));
@@ -1672,12 +1881,13 @@ mod tests {
             roles: vec![SERVICE_ACCESS_ROLE.to_string()],
             exp: 0,
         };
+        let zmq = MockZmqSender {};
 
         let form = NewTaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        add_task_comment(&repo, &user, task.id, form).expect("should add comment");
+        add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
 
         let events = repo.events.borrow();
         assert_eq!(events.len(), 1);
@@ -1691,16 +1901,80 @@ mod tests {
     }
 
     #[test]
-    fn add_task_comment_requires_role() {
-        let task = sample_task(91, 1, None, 5);
-        let repo = UpdateRepo::new(task, Vec::new());
-        let user = user_with_roles(&[]);
+    fn add_task_comment_notifies_participants_except_author() {
+        let author = sample_user(31, 1, "Author", "author@example.com");
+        let assignee = sample_user(32, 1, "Assignee", "assignee@example.com");
+        let participant = sample_user(33, 1, "Participant", "participant@example.com");
+        let task = sample_task(107, 1, Some(assignee.id), author.id);
+        let repo = UpdateRepo::new(
+            task.clone(),
+            vec![author.clone(), assignee.clone(), participant.clone()],
+        );
+        repo.events
+            .borrow_mut()
+            .push(sample_event(501, task.id, Some(participant.id)));
+
+        let zmq = RecordingZmqSender::default();
+        let user = AuthenticatedUser {
+            sub: "auth0|commenter".to_string(),
+            email: "commenter@example.com".to_string(),
+            hub_id: 1,
+            name: "Commenting User".to_string(),
+            roles: vec![SERVICE_ACCESS_ROLE.to_string()],
+            exp: 0,
+        };
 
         let form = NewTaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        let result = add_task_comment(&repo, &user, 91, form);
+        add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
+
+        let payloads = zmq.messages();
+        assert_eq!(payloads.len(), 1);
+
+        let envelope: ZMQSendEmailMessage =
+            serde_json::from_slice(&payloads[0]).expect("valid email payload");
+
+        match envelope {
+            ZMQSendEmailMessage::NewEmail(message) => {
+                let (actor, email) = *message;
+                assert_eq!(actor.email, user.email);
+
+                let addresses: HashSet<_> = email
+                    .recipients
+                    .iter()
+                    .map(|recipient| recipient.address.as_str())
+                    .collect();
+
+                assert_eq!(addresses.len(), 3);
+                assert!(addresses.contains(author.email.as_str()));
+                assert!(addresses.contains(assignee.email.as_str()));
+                assert!(addresses.contains(participant.email.as_str()));
+                assert!(!addresses.contains(user.email.as_str()));
+
+                assert_eq!(
+                    email.subject.as_deref(),
+                    Some("Новый комментарий в задаче: Test Task"),
+                );
+                assert!(email.message.contains("Комментарий"));
+            }
+            _ => panic!("unexpected email payload variant"),
+        }
+    }
+
+    #[test]
+    fn add_task_comment_requires_role() {
+        let task = sample_task(91, 1, None, 5);
+        let repo = UpdateRepo::new(task, Vec::new());
+        let user = user_with_roles(&[]);
+        let zmq = MockZmqSender {};
+
+        let form = NewTaskCommentForm {
+            message: "Комментарий".to_string(),
+        };
+
+        let result = add_task_comment(&repo, &zmq, &user, 91, form);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1710,12 +1984,13 @@ mod tests {
         let task = sample_task(93, 1, None, 5);
         let repo = UpdateRepo::new(task, Vec::new());
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let zmq = MockZmqSender {};
 
         let form = NewTaskCommentForm {
             message: String::new(),
         };
 
-        let result = add_task_comment(&repo, &user, 93, form);
+        let result = add_task_comment(&repo, &zmq, &user, 93, form);
 
         assert!(matches!(result, Err(ServiceError::Form(_))));
     }
@@ -1725,12 +2000,13 @@ mod tests {
         let task = sample_task(99, 1, None, 5);
         let repo = UpdateRepo::new(task, Vec::new());
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let zmq = MockZmqSender {};
 
         let form = NewTaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        let result = add_task_comment(&repo, &user, 123, form);
+        let result = add_task_comment(&repo, &zmq, &user, 123, form);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
