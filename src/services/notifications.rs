@@ -57,10 +57,22 @@ pub(super) fn task_recipient(
 }
 
 pub(super) fn sanitize_text(value: &str) -> String {
-    let sanitized = ammonia::clean(value);
-    if sanitized.trim().is_empty() {
-        value.trim().to_string()
-    } else {
-        sanitized
+    ammonia::clean(value).trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_text;
+
+    #[test]
+    fn retains_allowed_markup_in_sanitized_output() {
+        let result = sanitize_text("<strong>Hello</strong> world");
+        assert_eq!(result, "<strong>Hello</strong> world");
+    }
+
+    #[test]
+    fn does_not_restore_removed_html_fragments() {
+        let result = sanitize_text("<script>alert(1)</script>");
+        assert!(result.is_empty());
     }
 }
