@@ -187,7 +187,13 @@ pub fn update_task<R, Z>(
     form: UpdateTaskForm,
 ) -> ServiceResult<Task>
 where
-    R: TaskReader + TaskWriter + TaskEventWriter + UserReader + UserWriter + ?Sized,
+    R: TaskReader
+        + TaskWriter
+        + TaskEventReader
+        + TaskEventWriter
+        + UserReader
+        + UserWriter
+        + ?Sized,
     Z: ZmqSenderExt,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
@@ -331,8 +337,45 @@ where
         None => None,
     };
 
-    if let Some(email) =
-        build_task_updated_email(&updated, author_user.as_ref(), assignee_user.as_ref(), user)
+    let event_actors = {
+        let mut actors = Vec::new();
+        let mut seen_actor_ids = HashSet::new();
+
+        let events = repo
+            .list_events_for_task(updated.id, user.hub_id)
+            .map_err(ServiceError::from)?;
+
+        for event in events {
+            if let Some(actor_id) = event.user_id {
+                if !seen_actor_ids.insert(actor_id) {
+                    continue;
+                }
+
+                match repo.get_user_by_id(actor_id, user.hub_id) {
+                    Ok(Some(actor)) => actors.push(actor),
+                    Ok(None) => {
+                        log::warn!(
+                            "Task {} event {} references missing actor {}",
+                            updated.id,
+                            event.id,
+                            actor_id
+                        );
+                    }
+                    Err(err) => return Err(ServiceError::from(err)),
+                }
+            }
+        }
+
+        actors
+    };
+
+    if let Some(email) = build_task_updated_email(
+        &updated,
+        author_user.as_ref(),
+        assignee_user.as_ref(),
+        &event_actors,
+        user,
+    )
         && let Err(err) = notifications::queue_email(zmq_sender, user, email)
     {
         log::error!("Failed to queue task-updated email: {err}");
@@ -440,6 +483,7 @@ fn build_task_updated_email(
     task: &Task,
     author: Option<&User>,
     assignee: Option<&User>,
+    event_actors: &[User],
     actor: &AuthenticatedUser,
 ) -> Option<NewEmail> {
     let actor_email = actor.email.trim().to_lowercase();
@@ -469,6 +513,18 @@ fn build_task_updated_email(
                 assignee,
                 "task_updated",
                 "assignee",
+            ));
+        }
+    }
+
+    for event_actor in event_actors {
+        let email = event_actor.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                task,
+                event_actor,
+                "task_updated",
+                "event_actor",
             ));
         }
     }
@@ -602,11 +658,10 @@ where
 
     let mut event_actor_ids = HashSet::new();
     for event in task_events {
-        if let Some(user_id) = event.user_id {
-            if user_id != comment_author.id {
+        if let Some(user_id) = event.user_id
+            && user_id != comment_author.id {
                 event_actor_ids.insert(user_id);
             }
-        }
     }
 
     for actor_id in event_actor_ids {
@@ -1542,8 +1597,15 @@ mod tests {
     fn update_task_notifies_participants() {
         let author = sample_user(3, 1, "Author", "author@example.com");
         let assignee = sample_user(5, 1, "Executor", "executor@example.com");
+        let commenter = sample_user(7, 1, "Commenter", "commenter@example.com");
         let task = sample_task(55, 1, Some(assignee.id), author.id);
-        let repo = UpdateRepo::new(task.clone(), vec![author.clone(), assignee.clone()]);
+        let repo = UpdateRepo::new(
+            task.clone(),
+            vec![author.clone(), assignee.clone(), commenter.clone()],
+        );
+        repo.events
+            .borrow_mut()
+            .push(sample_event(77, task.id, Some(commenter.id)));
         let zmq = RecordingZmqSender::default();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
@@ -1571,7 +1633,7 @@ mod tests {
             ZMQSendEmailMessage::NewEmail(message) => {
                 let (actor, email) = *message;
                 assert_eq!(actor.email, user.email);
-                assert_eq!(email.recipients.len(), 2);
+                assert_eq!(email.recipients.len(), 3);
 
                 let addresses: std::collections::HashSet<_> = email
                     .recipients
@@ -1581,6 +1643,7 @@ mod tests {
 
                 assert!(addresses.contains(author.email.as_str()));
                 assert!(addresses.contains(assignee.email.as_str()));
+                assert!(addresses.contains(commenter.email.as_str()));
                 assert_eq!(
                     email.subject.as_deref(),
                     Some("Обновление задачи: Updated title"),

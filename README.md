@@ -33,8 +33,8 @@ of Actix Web, Diesel, and Tera and integrates tightly with the shared
   list over JSON for integrations that need a machine-readable snapshot.
 - **Email notifications** – The service publishes a ZeroMQ message for email
   delivery whenever a task is created or a task event occurs, notifying the
-  assignee and the author while skipping notifications to the actor who performed
-  the event.
+  author, the assignee, and every participant who has generated task events so
+  far—always skipping the actor who performed the current change.
 
 ## Pages
 
