@@ -31,6 +31,10 @@ of Actix Web, Diesel, and Tera and integrates tightly with the shared
   messages.
 - **JSON task feed** – The `/v1/tasks` endpoint exposes the same filtered task
   list over JSON for integrations that need a machine-readable snapshot.
+- **Email notifications** – The service publishes a ZeroMQ message for email
+  delivery whenever a task is created or a task event occurs, notifying the
+  assignee and the author while skipping notifications to the actor who performed
+  the event.
 
 ## Pages
 
@@ -107,6 +111,7 @@ ones are:
 | `PORT` | HTTP port | `8080` |
 | `ADDRESS` | Interface to bind | `127.0.0.1` |
 | `DOMAIN` | Cookie domain (without protocol) | `localhost` |
+| `ZMQ_EMAILER_PUB` | ZeroMQ endpoint for queuing outbound emails | `tcp://127.0.0.1:5557` |
 
 Create a `.env` file if you want these values loaded automatically via
 [`dotenvy`](https://crates.io/crates/dotenvy).
