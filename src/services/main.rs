@@ -151,7 +151,7 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 /// Validates the add-task form and persists a new task record.
 pub fn add_task<R, Z>(
     repo: &R,
-    zmq_sender: &Z,
+    _zmq_sender: &Z,
     user: &AuthenticatedUser,
     form: AddTaskForm,
 ) -> ServiceResult<Task>

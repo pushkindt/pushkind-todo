@@ -87,8 +87,8 @@ pub async fn update_task(
     web::Form(form): web::Form<UpdateTaskForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
-
-    match task_service::update_task(repo.get_ref(), &user, task_id, form) {
+    let zmq_sender = zmq_sender.get_ref().as_ref();
+    match task_service::update_task(repo.get_ref(), zmq_sender, &user, task_id, form) {
         Ok(updated_task) => {
             FlashMessage::success("Задача обновлена.").send();
             redirect(&format!("/task/{}", updated_task.id))

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::check_role;
+use pushkind_common::zmq::ZmqSenderExt;
 use serde::Serialize;
 use serde_json::{Value, json};
 use validator::Validate;
@@ -175,14 +176,16 @@ where
 }
 
 /// Update a task with the values submitted from the edit form.
-pub fn update_task<R>(
+pub fn update_task<R, Z>(
     repo: &R,
+    _zmq_sender: &Z,
     user: &AuthenticatedUser,
     task_id: i32,
     form: UpdateTaskForm,
 ) -> ServiceResult<Task>
 where
     R: TaskReader + TaskWriter + TaskEventWriter + UserReader + UserWriter + ?Sized,
+    Z: ZmqSenderExt,
 {
     if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
         return Err(ServiceError::Unauthorized);
