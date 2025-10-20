@@ -208,11 +208,10 @@ where
         err
     })?;
 
-    if let Some(assignee) = assignee_user.as_ref() {
-        if let Some(email) = build_task_created_email(&created, &author, assignee, user) {
+    if let Some(assignee) = assignee_user.as_ref()
+        && let Some(email) = build_task_created_email(&created, &author, assignee, user) {
             notifications::queue_email(zmq_sender, user, email)?;
         }
-    }
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
@@ -275,12 +274,11 @@ fn build_task_created_email(
         sanitized_title, sanitized_author_name, author.email
     );
 
-    if let Some(description) = &task.description {
-        if !description.trim().is_empty() {
+    if let Some(description) = &task.description
+        && !description.trim().is_empty() {
             message.push_str("<hr>");
             message.push_str(description);
         }
-    }
 
     let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee");
 

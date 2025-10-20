@@ -496,12 +496,11 @@ fn build_task_updated_email(
         ));
     }
 
-    if let Some(description) = &task.description {
-        if !description.trim().is_empty() {
+    if let Some(description) = &task.description
+        && !description.trim().is_empty() {
             message.push_str("<hr>");
             message.push_str(description);
         }
-    }
 
     Some(NewEmail {
         message,
