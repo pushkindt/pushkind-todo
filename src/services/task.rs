@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::domain::emailer::email::NewEmail;
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
@@ -19,6 +20,8 @@ use crate::repository::{
     TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
 use crate::services::{ServiceError, ServiceResult};
+
+use super::notifications;
 
 /// Task event accompanied by the optional author information.
 #[derive(Debug, Serialize)]
@@ -178,7 +181,7 @@ where
 /// Update a task with the values submitted from the edit form.
 pub fn update_task<R, Z>(
     repo: &R,
-    _zmq_sender: &Z,
+    zmq_sender: &Z,
     user: &AuthenticatedUser,
     task_id: i32,
     form: UpdateTaskForm,
@@ -317,6 +320,23 @@ where
         repo.touch_visited_at(actor.id, actor.hub_id)?;
     }
 
+    let author_user = repo
+        .get_user_by_id(updated.author_id, user.hub_id)
+        .map_err(ServiceError::from)?;
+
+    let assignee_user = match updated.assigned_to {
+        Some(assignee_id) => repo
+            .get_user_by_id(assignee_id, user.hub_id)
+            .map_err(ServiceError::from)?,
+        None => None,
+    };
+
+    if let Some(email) =
+        build_task_updated_email(&updated, author_user.as_ref(), assignee_user.as_ref(), user)
+    {
+        notifications::queue_email(zmq_sender, user, email)?;
+    }
+
     Ok(updated)
 }
 
@@ -415,6 +435,85 @@ fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
     }
 }
 
+fn build_task_updated_email(
+    task: &Task,
+    author: Option<&User>,
+    assignee: Option<&User>,
+    actor: &AuthenticatedUser,
+) -> Option<NewEmail> {
+    let actor_email = actor.email.trim().to_lowercase();
+    let sanitized_title = notifications::sanitize_text(&task.title);
+    let sanitized_actor_name = notifications::sanitize_text(&actor.name);
+
+    let mut recipients = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(author) = author {
+        let email = author.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                task,
+                author,
+                "task_updated",
+                "author",
+            ));
+        }
+    }
+
+    if let Some(assignee) = assignee {
+        let email = assignee.email.trim().to_lowercase();
+        if email != actor_email && seen.insert(email.clone()) {
+            recipients.push(notifications::task_recipient(
+                task,
+                assignee,
+                "task_updated",
+                "assignee",
+            ));
+        }
+    }
+
+    if recipients.is_empty() {
+        return None;
+    }
+
+    let mut message = format!(
+        "<p>Задача <strong>{}</strong> была обновлена пользователем {} ({}).</p>",
+        sanitized_title, sanitized_actor_name, actor.email
+    );
+
+    let status: &'static str = task.status.into();
+    message.push_str(&format!("<p>Текущий статус: {}.</p>", status));
+
+    if let Some(due_date) = task.due_date {
+        message.push_str(&format!("<p>Срок выполнения: {}.</p>", due_date));
+    }
+
+    if let Some(assignee) = assignee {
+        let sanitized_assignee = notifications::sanitize_text(&assignee.name);
+        message.push_str(&format!(
+            "<p>Текущий исполнитель: {} ({}).</p>",
+            sanitized_assignee, assignee.email
+        ));
+    }
+
+    if let Some(description) = &task.description {
+        if !description.trim().is_empty() {
+            message.push_str("<hr>");
+            message.push_str(description);
+        }
+    }
+
+    Some(NewEmail {
+        message,
+        subject: Some(format!("Обновление задачи: {}", sanitized_title)),
+        attachment: None,
+        attachment_name: None,
+        attachment_mime: None,
+        hub_id: actor.hub_id,
+        recipients,
+    })
+}
+
 /// Record a new comment on the specified task from the current user.
 pub fn add_task_comment<R>(
     repo: &R,
@@ -494,9 +593,12 @@ where
 mod tests {
     use super::*;
     use chrono::{NaiveDate, NaiveDateTime};
+    use pushkind_common::models::emailer::zmq::ZMQSendEmailMessage;
     use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
+    use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderTrait};
     use serde_json::json;
     use std::cell::RefCell;
+    use std::sync::Mutex;
 
     use crate::domain::{
         task::{
@@ -512,6 +614,40 @@ mod tests {
     use crate::repository::{TaskListQuery, UserListQuery};
     use crate::services::mock::MockZmqSender;
     use mockall::Sequence;
+
+    #[derive(Default)]
+    struct RecordingZmqSender {
+        payloads: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl RecordingZmqSender {
+        fn messages(&self) -> Vec<Vec<u8>> {
+            self.payloads.lock().unwrap().clone()
+        }
+    }
+
+    impl ZmqSenderTrait for RecordingZmqSender {
+        fn send_bytes<'a>(&'a self, bytes: Vec<u8>) -> SendFuture<'a> {
+            {
+                let mut payloads = self.payloads.lock().unwrap();
+                payloads.push(bytes);
+            }
+            Box::pin(async { Ok(()) })
+        }
+
+        fn try_send_bytes(&self, bytes: Vec<u8>) -> Result<(), ZmqSenderError> {
+            self.payloads.lock().unwrap().push(bytes);
+            Ok(())
+        }
+
+        fn send_multipart<'a>(&'a self, frames: Vec<Vec<u8>>) -> SendFuture<'a> {
+            {
+                let mut payloads = self.payloads.lock().unwrap();
+                payloads.extend(frames);
+            }
+            Box::pin(async { Ok(()) })
+        }
+    }
 
     struct TaskDetailsRepo {
         pub task_reader: MockTaskReader,
@@ -1256,6 +1392,60 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn update_task_notifies_participants() {
+        let author = sample_user(3, 1, "Author", "author@example.com");
+        let assignee = sample_user(5, 1, "Executor", "executor@example.com");
+        let task = sample_task(55, 1, Some(assignee.id), author.id);
+        let repo = UpdateRepo::new(task.clone(), vec![author.clone(), assignee.clone()]);
+        let zmq = RecordingZmqSender::default();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated title",
+            "message": "Updated description",
+            "status": "InProgress",
+            "due_date": "2024-05-01",
+            "name": assignee.name,
+            "email": assignee.email,
+        }))
+        .expect("valid form payload");
+
+        let outcome = update_task(&repo, &zmq, &user, task.id, form).expect("should update task");
+
+        assert_eq!(outcome.title, "Updated title");
+
+        let payloads = zmq.messages();
+        assert_eq!(payloads.len(), 1);
+
+        let envelope: ZMQSendEmailMessage =
+            serde_json::from_slice(&payloads[0]).expect("valid email payload");
+
+        match envelope {
+            ZMQSendEmailMessage::NewEmail(message) => {
+                let (actor, email) = *message;
+                assert_eq!(actor.email, user.email);
+                assert_eq!(email.recipients.len(), 2);
+
+                let addresses: std::collections::HashSet<_> = email
+                    .recipients
+                    .iter()
+                    .map(|recipient| recipient.address.as_str())
+                    .collect();
+
+                assert!(addresses.contains(author.email.as_str()));
+                assert!(addresses.contains(assignee.email.as_str()));
+                assert_eq!(
+                    email.subject.as_deref(),
+                    Some("Обновление задачи: Updated title"),
+                );
+                assert!(email.message.contains("Updated title"));
+                assert!(email.message.contains("Test User"));
+            }
+            _ => panic!("unexpected email payload variant"),
+        }
     }
 
     #[test]

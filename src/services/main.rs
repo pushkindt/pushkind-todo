@@ -1,5 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::domain::emailer::email::NewEmail;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
@@ -8,9 +9,12 @@ use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskStatus};
+use crate::domain::user::User;
 use crate::forms::main::{AddTaskForm, UploadTasksForm, build_new_task_payload};
 use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
 use crate::services::{ServiceError, ServiceResult};
+
+use super::notifications;
 
 /// Query parameters accepted by the index page service.
 #[derive(Debug, Default, Deserialize)]
@@ -151,7 +155,7 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 /// Validates the add-task form and persists a new task record.
 pub fn add_task<R, Z>(
     repo: &R,
-    _zmq_sender: &Z,
+    zmq_sender: &Z,
     user: &AuthenticatedUser,
     form: AddTaskForm,
 ) -> ServiceResult<Task>
@@ -195,7 +199,7 @@ where
         None => None,
     };
 
-    if let Some(assignee) = assignee_user {
+    if let Some(assignee) = assignee_user.as_ref() {
         new_task = new_task.assign_to(assignee.id);
     }
 
@@ -203,6 +207,12 @@ where
         log::error!("Failed to add a task: {err}");
         err
     })?;
+
+    if let Some(assignee) = assignee_user.as_ref() {
+        if let Some(email) = build_task_created_email(&created, &author, assignee, user) {
+            notifications::queue_email(zmq_sender, user, email)?;
+        }
+    }
 
     repo.touch_visited_at(author.id, author.hub_id)?;
 
@@ -244,12 +254,56 @@ where
     Ok(created_count)
 }
 
+fn build_task_created_email(
+    task: &Task,
+    author: &User,
+    assignee: &User,
+    actor: &AuthenticatedUser,
+) -> Option<NewEmail> {
+    let actor_email = actor.email.trim().to_lowercase();
+    let assignee_email = assignee.email.trim().to_lowercase();
+
+    if actor_email == assignee_email {
+        return None;
+    }
+
+    let sanitized_title = notifications::sanitize_text(&task.title);
+    let sanitized_author_name = notifications::sanitize_text(&author.name);
+
+    let mut message = format!(
+        "<p>Вам назначена новая задача <strong>{}</strong> от {} ({}).</p>",
+        sanitized_title, sanitized_author_name, author.email
+    );
+
+    if let Some(description) = &task.description {
+        if !description.trim().is_empty() {
+            message.push_str("<hr>");
+            message.push_str(description);
+        }
+    }
+
+    let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee");
+
+    Some(NewEmail {
+        message,
+        subject: Some(format!("Вам назначена задача: {}", sanitized_title)),
+        attachment: None,
+        attachment_name: None,
+        attachment_mime: None,
+        hub_id: actor.hub_id,
+        recipients: vec![recipient],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use actix_multipart::form::tempfile::TempFile;
     use chrono::{Duration, NaiveDate, NaiveDateTime};
+    use mockall::Sequence;
+    use pushkind_common::models::emailer::zmq::ZMQSendEmailMessage;
     use pushkind_common::repository::errors::RepositoryError;
+    use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderTrait};
     use serde_json::Value;
     use tempfile::NamedTempFile;
 
@@ -265,6 +319,7 @@ mod tests {
     use crate::services::mock::MockZmqSender;
 
     use std::io::Write;
+    use std::sync::Mutex;
 
     fn fixed_datetime() -> NaiveDateTime {
         match NaiveDate::from_ymd_opt(2024, 1, 1) {
@@ -307,6 +362,40 @@ mod tests {
             name: name.to_string(),
             email: email.to_string(),
             visited_at: Some(fixed_datetime()),
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingZmqSender {
+        payloads: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl RecordingZmqSender {
+        fn messages(&self) -> Vec<Vec<u8>> {
+            self.payloads.lock().unwrap().clone()
+        }
+    }
+
+    impl ZmqSenderTrait for RecordingZmqSender {
+        fn send_bytes<'a>(&'a self, bytes: Vec<u8>) -> SendFuture<'a> {
+            {
+                let mut payloads = self.payloads.lock().unwrap();
+                payloads.push(bytes);
+            }
+            Box::pin(async { Ok(()) })
+        }
+
+        fn try_send_bytes(&self, bytes: Vec<u8>) -> Result<(), ZmqSenderError> {
+            self.payloads.lock().unwrap().push(bytes);
+            Ok(())
+        }
+
+        fn send_multipart<'a>(&'a self, frames: Vec<Vec<u8>>) -> SendFuture<'a> {
+            {
+                let mut payloads = self.payloads.lock().unwrap();
+                payloads.extend(frames);
+            }
+            Box::pin(async { Ok(()) })
         }
     }
 
@@ -1028,6 +1117,133 @@ mod tests {
 
         assert_eq!(created.hub_id, expected_hub);
         assert_eq!(created.assigned_to, Some(expected_assignee_id));
+    }
+
+    #[test]
+    fn add_task_notifies_assignee_via_email() {
+        let mut repo = TaskWriterUserRepo::new();
+        let zmq = RecordingZmqSender::default();
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+        let assignee_email = "assignee@example.com".to_string();
+        let assignee_name = "Assigned User".to_string();
+
+        let form = AddTaskForm {
+            title: Some("New Task".to_string()),
+            message: Some("Task details".to_string()),
+            assignee: AssigneeSelectionForm {
+                email: Some(assignee_email.clone()),
+                name: Some(assignee_name.clone()),
+            },
+        };
+
+        let expected_hub = user.hub_id;
+        let author_record =
+            sample_user_record(5, expected_hub, &user.email.to_lowercase(), &user.name);
+        let assignee_record = sample_user_record(9, expected_hub, &assignee_email, &assignee_name);
+
+        repo.user_reader.expect_get_user_by_email().never();
+
+        let mut seq = Sequence::new();
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once({
+                let author_record = author_record.clone();
+                move |new_user| {
+                    assert_eq!(new_user.email, author_record.email);
+                    Ok(author_record.clone())
+                }
+            });
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once({
+                let assignee_record = assignee_record.clone();
+                move |new_user| {
+                    assert_eq!(new_user.email, assignee_record.email);
+                    Ok(assignee_record.clone())
+                }
+            });
+        repo.user_writer
+            .expect_touch_visited_at()
+            .times(1)
+            .returning({
+                let author_record = author_record.clone();
+                move |user_id, hub_id| {
+                    assert_eq!(user_id, author_record.id);
+                    assert_eq!(hub_id, author_record.hub_id);
+                    Ok(())
+                }
+            });
+
+        let created_task = Task {
+            id: 51,
+            hub_id: expected_hub,
+            title: "New Task".to_string(),
+            description: Some("Task details".to_string()),
+            status: TaskStatus::Pending,
+            due_date: None,
+            assigned_to: Some(assignee_record.id),
+            author_id: author_record.id,
+            created_at: fixed_datetime(),
+            updated_at: fixed_datetime(),
+            completed_at: None,
+        };
+
+        repo.task_writer.expect_create_task().times(1).returning({
+            let assignee_record = assignee_record.clone();
+            let created_task = created_task.clone();
+            move |new_task| {
+                assert_eq!(new_task.hub_id, created_task.hub_id);
+                assert_eq!(new_task.title, created_task.title);
+                assert_eq!(new_task.description, created_task.description);
+                assert_eq!(new_task.assigned_to, Some(assignee_record.id));
+                Ok(created_task.clone())
+            }
+        });
+
+        let outcome = add_task(&repo, &zmq, &user, form).expect("should create task");
+
+        assert_eq!(outcome.id, created_task.id);
+
+        let payloads = zmq.messages();
+        assert_eq!(payloads.len(), 1);
+
+        let envelope: ZMQSendEmailMessage =
+            serde_json::from_slice(&payloads[0]).expect("valid email payload");
+
+        match envelope {
+            ZMQSendEmailMessage::NewEmail(message) => {
+                let (actor, email) = *message;
+                assert_eq!(actor.email, user.email);
+                assert_eq!(email.hub_id, user.hub_id);
+                assert_eq!(email.recipients.len(), 1);
+
+                let recipient = &email.recipients[0];
+                assert_eq!(recipient.address, assignee_record.email);
+                assert_eq!(recipient.name, assignee_record.name);
+                assert_eq!(
+                    recipient
+                        .fields
+                        .get("notification_kind")
+                        .map(String::as_str),
+                    Some("task_created"),
+                );
+                let expected_task_id = created_task.id.to_string();
+                assert_eq!(
+                    recipient.fields.get("task_id").map(String::as_str),
+                    Some(expected_task_id.as_str()),
+                );
+                assert_eq!(
+                    email.subject.as_deref(),
+                    Some("Вам назначена задача: New Task"),
+                );
+                assert!(email.message.contains("New Task"));
+            }
+            _ => panic!("unexpected email payload variant"),
+        }
     }
 
     #[test]
