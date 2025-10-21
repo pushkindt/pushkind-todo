@@ -222,6 +222,8 @@ where
         task_id,
         title,
         description,
+        track,
+        priority,
         status,
         due_date,
         assignee,
@@ -248,6 +250,15 @@ where
         Some(body) => updates.description(body),
         None => updates.clear_description(),
     };
+
+    updates = match track {
+        Some(body) => updates.track(body),
+        None => updates.clear_track(),
+    };
+
+    if let Some(priority) = priority {
+        updates = updates.priority(priority);
+    }
 
     updates = match due_date {
         Some(date) => updates.due_date(date),
@@ -1412,6 +1423,8 @@ mod tests {
 
             task.title = updates.title.clone();
             task.description = updates.description.clone();
+            task.track = updates.track.clone();
+            task.priority = updates.priority;
             task.status = updates.status;
             task.due_date = updates.due_date;
             task.assigned_to = updates.assigned_to;
@@ -1637,6 +1650,63 @@ mod tests {
                 "due_date": {
                     "from": serde_json::Value::Null,
                     "to": due_date.to_string(),
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": serde_json::Value::Null,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn update_task_updates_track_and_priority() {
+        let task = sample_task(50, 1, None, 3);
+        let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated title",
+            "status": "Pending",
+            "track": "New Track",
+            "priority": "High",
+        }))
+        .expect("valid form payload");
+
+        let outcome = update_task(&repo, &zmq, &user, 50, form).expect("should update task");
+
+        assert_eq!(outcome.title, "Updated title");
+
+        let stored = repo.task.borrow().clone();
+        assert_eq!(stored.track.as_deref(), Some("New Track"));
+        assert_eq!(stored.priority, TaskPriority::High);
+
+        let events = repo.events.borrow();
+        let metadata_event = events
+            .iter()
+            .find(|event| event.event_type == TaskEventType::MetadataUpdated)
+            .expect("metadata event should be recorded");
+
+        let from_priority: &'static str = TaskPriority::default().into();
+        assert_eq!(
+            metadata_event.event_data,
+            json!({
+                "title": {
+                    "from": "Test Task",
+                    "to": "Updated title",
+                },
+                "description": {
+                    "from": "Detail",
+                    "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": "New Track",
+                },
+                "priority": {
+                    "from": from_priority,
+                    "to": "High",
                 }
             })
         );
@@ -1761,6 +1831,10 @@ mod tests {
                 "description": {
                     "from": "Detail",
                     "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": serde_json::Value::Null,
                 }
             })
         );
@@ -1816,6 +1890,10 @@ mod tests {
                 },
                 "description": {
                     "from": "Detail",
+                    "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
                     "to": serde_json::Value::Null,
                 }
             })

@@ -60,16 +60,16 @@
     </div>
 
     <div class="row d-none d-sm-flex fw-bold">
-        <div class="col-sm-2 overflow-hidden">Идентификатор</div>
+        <div class="col-sm overflow-hidden">Трек</div>
         <div class="col-sm overflow-hidden">Название</div>
         <div class="col-sm overflow-hidden">Описание</div>
-        <div class="col-sm-2 overflow-hidden">Статус</div>
+        <div class="col-sm-2 overflow-hidden">Статус/Приоритет</div>
     </div>
     <div id="taskList">
         {% for task in tasks.items %}
         <div class="row my-1 py-1 border-top selectable {% if task.id in recently_updated_task_ids %}task-recent{% endif %}" data-id="{{ task.id }}">
-            <div class="col-sm-2">
-                <strong>{{ task.id }}</strong>
+            <div class="col-sm">
+                <strong>{{ task.track | default(value="—") }}</strong>
                 <div class="text-muted small">
                     <i class="bi bi-clock-history" aria-hidden="true"></i> {{ task.updated_at | date(format="%Y-%m-%d %H:%M") }}
                 </div>
@@ -83,8 +83,14 @@
                 {{ macros::task_description(description=task.description) }}
             </div>
             <div class="col-sm-2">
-                <span class="d-sm-none fw-bold">Статус:</span>
-                {{ macros::task_status(value=task.status) }}
+                <div>
+                    <span class="d-sm-none fw-bold">Статус:</span>
+                    {{ macros::task_status(value=task.status) }}
+                </div>
+                <div>
+                    <span class="d-sm-none fw-bold">Приоритет:</span>
+                    {{ macros::task_priority(value=task.priority) }}
+                </div>
             </div>
         </div>
         {% else %}

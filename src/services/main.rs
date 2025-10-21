@@ -274,6 +274,8 @@ where
     let AddTaskForm {
         title,
         message,
+        track,
+        priority,
         assignee,
     } = form;
 
@@ -285,7 +287,10 @@ where
         }
     };
 
-    let mut new_task = build_new_task_payload(user.hub_id, author.id, title, message);
+    let priority = AddTaskForm::parse_priority(priority);
+
+    let mut new_task =
+        build_new_task_payload(user.hub_id, author.id, title, message, track, priority);
 
     let assignee_user = match assignee.into_selection() {
         Some(selection) => {
@@ -1119,6 +1124,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            track: None,
+            priority: None,
             assignee: assignee_selection_form_none(),
         };
 
@@ -1135,6 +1142,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some(String::new()),
             message: None,
+            track: None,
+            priority: None,
             assignee: assignee_selection_form_none(),
         };
 
@@ -1156,6 +1165,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            track: None,
+            priority: None,
             assignee: assignee_selection_form_none(),
         };
 
@@ -1226,6 +1237,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            track: None,
+            priority: None,
             assignee: AssigneeSelectionForm {
                 email: Some(assignee_email.clone()),
                 name: Some(assignee_name.clone()),
@@ -1329,6 +1342,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("New Task".to_string()),
             message: Some("Task details".to_string()),
+            track: None,
+            priority: None,
             assignee: AssigneeSelectionForm {
                 email: Some(assignee_email.clone()),
                 name: Some(assignee_name.clone()),
@@ -1454,6 +1469,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            track: None,
+            priority: None,
             assignee: assignee_selection_form_none(),
         };
 
@@ -1513,6 +1530,8 @@ mod tests {
         let form = AddTaskForm {
             title: Some("alpha".to_string()),
             message: None,
+            track: None,
+            priority: None,
             assignee: assignee_selection_form_none(),
         };
 

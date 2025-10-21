@@ -29,13 +29,29 @@
     <div class="row mb-3">
         <label for="modifyTaskStatus" class="col-md-2 col-form-label">Статус</label>
         <div class="col-md-10">
-            {% set current_status = task.status | default(value='Pending') | lower %}
             <select class="form-select" id="modifyTaskStatus" name="status" required>
-                <option value="Pending" {% if current_status=='pending' %}selected{% endif %}>В ожидании</option>
-                <option value="InProgress" {% if current_status=='inprogress' %}selected{% endif %}>В работе</option>
-                <option value="Blocked" {% if current_status=='blocked' %}selected{% endif %}>Заблокирована</option>
-                <option value="Completed" {% if current_status=='completed' %}selected{% endif %}>Завершена</option>
-                <option value="Archived" {% if current_status=='archived' %}selected{% endif %}>Архивирована</option>
+                <option value="Pending" {% if task.status=='Pending' %}selected{% endif %}>В ожидании</option>
+                <option value="InProgress" {% if task.status=='InProgress' %}selected{% endif %}>В работе</option>
+                <option value="Blocked" {% if task.status=='Blocked' %}selected{% endif %}>Заблокирована</option>
+                <option value="Completed" {% if task.status=='Completed' %}selected{% endif %}>Завершена</option>
+                <option value="Archived" {% if task.status=='Archived' %}selected{% endif %}>Архивирована</option>
+            </select>
+        </div>
+    </div>
+    <div class="row mb-3">
+        <label for="taskModalTrack" class="col-md-2 col-form-label">Трек</label>
+        <div class="col-md-10">
+            <input name="track" list="available-tracks" type="text" class="form-control" id="taskModalTrack"
+                placeholder="Трек" value="{{ task.track }}">
+        </div>
+    </div>
+    <div class="row mb-3">
+        <label for="taskModalPriority" class="col-md-2 col-form-label">Приоритет</label>
+        <div class="col-md-10">
+            <select name="priority" class="form-select" id="taskModalPriority" required>
+                <option value="Middle" {% if task.priority=='Middle' %}selected{% endif %}>Средний</option>
+                <option value="Low" {% if task.priority=='Low' %}selected{% endif %}>Низкий</option>
+                <option value="High" {% if task.priority=='High' %}selected{% endif %}>Высокий</option>
             </select>
         </div>
     </div>

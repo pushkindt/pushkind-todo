@@ -1,21 +1,20 @@
 {% macro task_status(value) %}
     {% if value %}
-        {% set status_key = value | default(value="pending") | lower %}
-        {% set status_label = status_key %}
+        {% set status_label = value %}
         {% set status_class = "badge text-bg-secondary" %}
-        {% if status_key == "pending" %}
+        {% if value == "Pending" %}
             {% set status_label = "В ожидании" %}
             {% set status_class = "badge text-bg-warning" %}
-        {% elif status_key == "inprogress" %}
+        {% elif value == "InProgress" %}
             {% set status_label = "В работе" %}
             {% set status_class = "badge text-bg-primary" %}
-        {% elif status_key == "blocked" %}
+        {% elif value == "Blocked" %}
             {% set status_label = "Заблокирована" %}
             {% set status_class = "badge text-bg-danger" %}
-        {% elif status_key == "completed" %}
+        {% elif value == "Completed" %}
             {% set status_label = "Завершена" %}
             {% set status_class = "badge text-bg-success" %}
-        {% elif status_key == "archived" %}
+        {% elif value == "Archived" %}
             {% set status_label = "Архивирована" %}
             {% set status_class = "badge text-bg-dark" %}
         {% endif %}
@@ -24,6 +23,26 @@
         <span class="text-muted">—</span>
     {% endif %}
 {% endmacro task_status %}
+
+{% macro task_priority(value) %}
+    {% if value %}
+        {% set status_label = value %}
+        {% set status_class = "badge text-bg-secondary" %}
+        {% if value == "Low" %}
+            {% set status_label = "Низкий" %}
+            {% set status_class = "badge text-bg-secondary" %}
+        {% elif value == "Middle" %}
+            {% set status_label = "Средний" %}
+            {% set status_class = "badge text-bg-primary" %}
+        {% elif value == "High" %}
+            {% set status_label = "Высокий" %}
+            {% set status_class = "badge text-bg-warning" %}
+        {% endif %}
+        <span class="{{ status_class }}">{{ status_label }}</span>
+    {% else %}
+        <span class="text-muted">—</span>
+    {% endif %}
+{% endmacro task_priority %}
 
 {% macro user_popover(user) %}
     {% if user %}

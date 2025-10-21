@@ -7,7 +7,10 @@ use serde::Deserialize;
 use thiserror::Error;
 use validator::Validate;
 
-use crate::{domain::task::NewTask, forms::task::AssigneeSelectionForm};
+use crate::{
+    domain::task::{NewTask, TaskPriority},
+    forms::task::AssigneeSelectionForm,
+};
 
 /// Build a [`NewTask`] payload with sanitized content shared across forms and services.
 pub(crate) fn build_new_task_payload(
@@ -15,6 +18,8 @@ pub(crate) fn build_new_task_payload(
     author_id: i32,
     title: String,
     description: Option<String>,
+    track: Option<String>,
+    priority: Option<TaskPriority>,
 ) -> NewTask {
     let mut new_task = NewTask::new(hub_id, author_id, title);
 
@@ -24,6 +29,18 @@ pub(crate) fn build_new_task_payload(
         if !sanitized.trim().is_empty() {
             new_task = new_task.description(sanitized);
         }
+    }
+
+    if let Some(track) = track {
+        let sanitized = track.trim();
+
+        if !sanitized.is_empty() {
+            new_task = new_task.track(sanitized);
+        }
+    }
+
+    if let Some(priority) = priority {
+        new_task = new_task.priority(priority);
     }
 
     new_task
@@ -36,6 +53,10 @@ pub struct AddTaskForm {
     pub title: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub message: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub track: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub priority: Option<String>,
     /// Assignee data captured by the modal.
     #[serde(flatten, default)]
     pub assignee: AssigneeSelectionForm,
@@ -45,13 +66,31 @@ impl AddTaskForm {
     /// Convert the validated form into a [`NewTask`] payload.
     pub fn into_new_task(self, hub_id: i32, author_id: i32) -> Option<NewTask> {
         let title = self.title?;
+        let priority = Self::parse_priority(self.priority);
 
         Some(build_new_task_payload(
             hub_id,
             author_id,
             title,
             self.message,
+            self.track,
+            priority,
         ))
+    }
+
+    pub(crate) fn parse_priority(priority: Option<String>) -> Option<TaskPriority> {
+        priority.and_then(|value| {
+            let trimmed = value.trim();
+
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            let priority = TaskPriority::from(trimmed);
+            let priority_text: &str = <&str>::from(priority);
+
+            (priority_text == trimmed).then_some(priority)
+        })
     }
 }
 
@@ -119,7 +158,8 @@ fn parse_tasks<R: Read>(
         let record = row?;
 
         if let Some(title) = record.title {
-            let task = build_new_task_payload(hub_id, author_id, title, record.description);
+            let task =
+                build_new_task_payload(hub_id, author_id, title, record.description, None, None);
 
             tasks.push(task);
         }
@@ -170,9 +210,39 @@ mod tests {
 
     #[test]
     fn build_new_task_payload_discards_empty_descriptions() {
-        let task = build_new_task_payload(1, 2, "title".to_string(), Some("   ".to_string()));
+        let task = build_new_task_payload(
+            1,
+            2,
+            "title".to_string(),
+            Some("   ".to_string()),
+            None,
+            None,
+        );
 
         assert!(task.description.is_none());
+    }
+
+    #[test]
+    fn build_new_task_payload_sets_track_and_priority() {
+        let task = build_new_task_payload(
+            1,
+            2,
+            "title".to_string(),
+            None,
+            Some("Alpha Track".to_string()),
+            Some(TaskPriority::High),
+        );
+
+        assert_eq!(task.track.as_deref(), Some("Alpha Track"));
+        assert_eq!(task.priority, TaskPriority::High);
+    }
+
+    #[test]
+    fn parse_priority_returns_none_for_invalid_values() {
+        assert_eq!(
+            AddTaskForm::parse_priority(Some("Unknown".to_string())),
+            None
+        );
     }
 
     #[test]
