@@ -27,8 +27,6 @@ diesel::table! {
         hub_id -> Integer,
         title -> Text,
         description -> Nullable<Text>,
-        track -> Nullable<Text>,
-        priority -> Text,
         status -> Text,
         due_date -> Nullable<Date>,
         assigned_to -> Nullable<Integer>,
@@ -36,6 +34,8 @@ diesel::table! {
         created_at -> Timestamp,
         updated_at -> Timestamp,
         completed_at -> Nullable<Timestamp>,
+        track -> Nullable<Text>,
+        priority -> Text,
     }
 }
 
@@ -56,4 +56,9 @@ diesel::joinable!(task_assignments -> users (assignee_id));
 diesel::joinable!(task_events -> tasks (task_id));
 diesel::joinable!(task_events -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(task_assignments, task_events, tasks, users,);
+diesel::allow_tables_to_appear_in_same_query!(
+    task_assignments,
+    task_events,
+    tasks,
+    users,
+);

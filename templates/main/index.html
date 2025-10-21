@@ -54,7 +54,7 @@
             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2 mt-1" type="button"
                 data-bs-toggle="modal" data-bs-target="#filtersModal">
                 <i class="bi bi-funnel"></i>
-                <span id="activeFiltersBadge" class="badge text-bg-primary {% if status_filter or updated_after or updated_before %}{% else %}d-none{% endif %}">•</span>
+                <span id="activeFiltersBadge" class="badge text-bg-primary {% if filters.status or filters.updated_after or filters.updated_before %}{% else %}d-none{% endif %}">•</span>
             </button>
         </div>
     </div>
@@ -97,10 +97,7 @@
     {{ macros::pagination(
         pages=tasks.pages,
         current_page=tasks.page,
-        search=search | default(value=""),
-        status=status_filter | default(value=""),
-        updated_after=updated_after | default(value=""),
-        updated_before=updated_before | default(value="")
+        filters=filters
     ) }}
 </div>
 
@@ -112,11 +109,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
             <form id="filtersForm" class="modal-body row g-3" method="get" action="/">
-                {% set status_value = status_filter | default(value="") %}
-                {% set updated_after_value = updated_after | default(value="") %}
-                {% set updated_before_value = updated_before | default(value="") %}
-                {% if search %}
-                <input type="hidden" name="search" value="{{ search }}">
+                {% set status_value = filters.status | default(value="") %}
+                {% set updated_after_value = filters.updated_after | default(value="") %}
+                {% set updated_before_value = filters.updated_before | default(value="") %}
+                {% if filters.search %}
+                <input type="hidden" name="search" value="{{ filters.search }}">
                 {% endif %}
                 <div class="col-12">
                     <label for="filterStatus" class="form-label small text-uppercase text-muted mb-1">Статус</label>

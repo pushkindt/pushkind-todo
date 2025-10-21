@@ -72,9 +72,19 @@
     </div>
 {% endmacro task_description %}
 
-{% macro pagination(pages, current_page=1, search="", status="", updated_after="", updated_before="") %}
+{% macro pagination(pages, current_page=1, filters=false) %}
     {% if pages | length > 1 %}
         {% set query_suffix = "" %}
+        {% set search = "" %}
+        {% set status = "" %}
+        {% set updated_after = "" %}
+        {% set updated_before = "" %}
+        {% if filters %}
+            {% set search = filters.search | default(value="") %}
+            {% set status = filters.status | default(value="") %}
+            {% set updated_after = filters.updated_after | default(value="") %}
+            {% set updated_before = filters.updated_before | default(value="") %}
+        {% endif %}
         {% if search %}
             {% set encoded_search = search | urlencode %}
             {% set query_suffix = query_suffix ~ "&search=" ~ encoded_search %}

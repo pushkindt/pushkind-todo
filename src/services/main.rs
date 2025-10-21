@@ -4,7 +4,7 @@ use pushkind_common::domain::emailer::email::NewEmail;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
@@ -32,9 +32,8 @@ pub struct IndexQuery {
 }
 
 /// Data required to render the main index tasks page.
-pub struct IndexPageData {
-    /// Paginated list of tasks to show in the table.
-    pub tasks: Paginated<Task>,
+#[derive(Debug, Serialize)]
+pub struct IndexPageFilters {
     /// Search query echoed back to the template when present.
     pub search: Option<String>,
     /// Status filter echoed back to the template when present.
@@ -43,6 +42,13 @@ pub struct IndexPageData {
     pub updated_after: Option<String>,
     /// Updated-before filter echoed back to the template when present.
     pub updated_before: Option<String>,
+}
+
+pub struct IndexPageData {
+    /// Paginated list of tasks to show in the table.
+    pub tasks: Paginated<Task>,
+    /// Filters currently applied to the task list.
+    pub filters: IndexPageFilters,
     /// Task identifiers that were updated after the user's last visit.
     pub recently_updated_task_ids: Vec<i32>,
 }
@@ -60,17 +66,25 @@ where
         return Err(ServiceError::Unauthorized);
     }
 
-    let page = query.page.unwrap_or(1);
+    let IndexQuery {
+        search,
+        page,
+        status,
+        updated_after,
+        updated_before,
+    } = query;
+
+    let page = page.unwrap_or(1);
     let mut list_query = TaskListQuery::new(user.hub_id).paginate(page, DEFAULT_ITEMS_PER_PAGE);
 
     let mut status_filter_text = None;
-    if let Some(status_value) = query.status.as_deref().and_then(parse_status_filter) {
+    if let Some(status_value) = status.as_deref().and_then(parse_status_filter) {
         list_query.filters_mut().status = Some(status_value);
         status_filter_text = Some((<&str>::from(status_value)).to_string());
     }
 
     let mut updated_after_text = None;
-    if let Some(updated_after_value) = query.updated_after.as_deref().and_then(parse_date_filter)
+    if let Some(updated_after_value) = updated_after.as_deref().and_then(parse_date_filter)
         && let Some(timestamp) = start_of_day(updated_after_value)
     {
         list_query.filters_mut().updated_after = Some(timestamp);
@@ -78,14 +92,14 @@ where
     }
 
     let mut updated_before_text = None;
-    if let Some(updated_before_value) = query.updated_before.as_deref().and_then(parse_date_filter)
+    if let Some(updated_before_value) = updated_before.as_deref().and_then(parse_date_filter)
         && let Some(timestamp) = end_of_day(updated_before_value)
     {
         list_query.filters_mut().updated_before = Some(timestamp);
         updated_before_text = Some(updated_before_value.format("%Y-%m-%d").to_string());
     }
 
-    if let Some(value) = query.search.as_ref()
+    if let Some(value) = search.as_ref()
         && !value.trim().is_empty()
     {
         list_query.filters_mut().search = Some(value.clone());
@@ -112,12 +126,16 @@ where
     let total_pages = total.div_ceil(DEFAULT_ITEMS_PER_PAGE);
     let tasks = Paginated::new(tasks, page, total_pages);
 
-    Ok(IndexPageData {
-        tasks,
-        search: query.search,
+    let filters = IndexPageFilters {
+        search,
         status: status_filter_text,
         updated_after: updated_after_text,
         updated_before: updated_before_text,
+    };
+
+    Ok(IndexPageData {
+        tasks,
+        filters,
         recently_updated_task_ids,
     })
 }
@@ -735,7 +753,7 @@ mod tests {
             Err(err) => panic!("expected success, got error: {err}"),
         };
 
-        assert_eq!(data.search.as_deref(), Some("alp"));
+        assert_eq!(data.filters.search.as_deref(), Some("alp"));
         assert!(data.recently_updated_task_ids.is_empty());
 
         let serialized = match serde_json::to_value(&data.tasks) {
@@ -846,9 +864,9 @@ mod tests {
             });
 
         let result = load_index_page(&repo, &user, query).expect("expected success");
-        assert_eq!(result.status.as_deref(), Some("Completed"));
-        assert_eq!(result.updated_after.as_deref(), Some("2024-05-01"));
-        assert_eq!(result.updated_before.as_deref(), Some("2024-05-31"));
+        assert_eq!(result.filters.status.as_deref(), Some("Completed"));
+        assert_eq!(result.filters.updated_after.as_deref(), Some("2024-05-01"));
+        assert_eq!(result.filters.updated_before.as_deref(), Some("2024-05-31"));
     }
 
     #[test]
