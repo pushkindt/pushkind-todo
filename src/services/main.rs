@@ -11,7 +11,9 @@ use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
 use crate::domain::user::User;
 use crate::forms::main::{AddTaskForm, UploadTasksForm, build_new_task_payload};
-use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter};
+use crate::repository::{
+    TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
+};
 use crate::services::{ServiceError, ServiceResult};
 
 use super::notifications;

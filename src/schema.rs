@@ -56,9 +56,4 @@ diesel::joinable!(task_assignments -> users (assignee_id));
 diesel::joinable!(task_events -> tasks (task_id));
 diesel::joinable!(task_events -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(
-    task_assignments,
-    task_events,
-    tasks,
-    users,
-);
+diesel::allow_tables_to_appear_in_same_query!(task_assignments, task_events, tasks, users,);
