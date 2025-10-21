@@ -77,11 +77,17 @@
         {% set query_suffix = "" %}
         {% set search = "" %}
         {% set status = "" %}
+        {% set track = "" %}
+        {% set priority = "" %}
+        {% set assignee = "" %}
         {% set updated_after = "" %}
         {% set updated_before = "" %}
         {% if filters %}
             {% set search = filters.search | default(value="") %}
             {% set status = filters.status | default(value="") %}
+            {% set track = filters.track | default(value="") %}
+            {% set priority = filters.priority | default(value="") %}
+            {% set assignee = filters.assignee | default(value="") %}
             {% set updated_after = filters.updated_after | default(value="") %}
             {% set updated_before = filters.updated_before | default(value="") %}
         {% endif %}
@@ -92,6 +98,18 @@
         {% if status %}
             {% set encoded_status = status | urlencode %}
             {% set query_suffix = query_suffix ~ "&status=" ~ encoded_status %}
+        {% endif %}
+        {% if track %}
+            {% set encoded_track = track | urlencode %}
+            {% set query_suffix = query_suffix ~ "&track=" ~ encoded_track %}
+        {% endif %}
+        {% if assignee %}
+            {% set encoded_assignee = assignee | urlencode %}
+            {% set query_suffix = query_suffix ~ "&assignee=" ~ encoded_assignee %}
+        {% endif %}
+        {% if priority %}
+            {% set encoded_priority = priority | urlencode %}
+            {% set query_suffix = query_suffix ~ "&priority=" ~ encoded_priority %}
         {% endif %}
         {% if updated_after %}
             {% set encoded_after = updated_after | urlencode %}

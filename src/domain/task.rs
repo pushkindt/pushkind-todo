@@ -250,8 +250,12 @@ pub struct TaskListFilters {
     pub hub_id: i32,
     /// Optional filter to only return tasks assigned to a user.
     pub assignee_id: Option<i32>,
+    /// Optional filter restricting tasks to a specific track.
+    pub track: Option<String>,
     /// Optional filter to limit results to a specific status.
     pub status: Option<TaskStatus>,
+    /// Optional filter to restrict results to a priority level.
+    pub priority: Option<TaskPriority>,
     /// Optional search term matching task titles or descriptions.
     pub search: Option<String>,
     /// Only return tasks due on or before this date.
@@ -270,7 +274,9 @@ impl TaskListFilters {
         Self {
             hub_id,
             assignee_id: None,
+            track: None,
             status: None,
+            priority: None,
             search: None,
             due_before: None,
             due_after: None,
@@ -285,9 +291,26 @@ impl TaskListFilters {
         self
     }
 
+    /// Restrict the results to a specific track name.
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        let track = track.into();
+        if track.trim().is_empty() {
+            self.track = None;
+        } else {
+            self.track = Some(track);
+        }
+        self
+    }
+
     /// Restrict the results to a particular status.
     pub fn with_status(mut self, status: TaskStatus) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Restrict the results to a particular priority level.
+    pub fn with_priority(mut self, priority: TaskPriority) -> Self {
+        self.priority = Some(priority);
         self
     }
 

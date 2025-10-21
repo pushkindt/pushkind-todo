@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::task::{Task, TaskStatus};
+use crate::domain::task::{Task, TaskPriority, TaskStatus};
 use crate::domain::user::User;
 use crate::forms::main::{AddTaskForm, UploadTasksForm, build_new_task_payload};
-use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserReader, UserWriter};
+use crate::repository::{TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter};
 use crate::services::{ServiceError, ServiceResult};
 
 use super::notifications;
@@ -25,6 +25,12 @@ pub struct IndexQuery {
     pub page: Option<usize>,
     /// Optional status filter provided by the user.
     pub status: Option<String>,
+    /// Optional track filter provided by the user.
+    pub track: Option<String>,
+    /// Optional assignee identifier filter provided by the user.
+    pub assignee: Option<String>,
+    /// Optional priority filter provided by the user.
+    pub priority: Option<String>,
     /// Only return tasks updated on or after this date (YYYY-MM-DD).
     pub updated_after: Option<String>,
     /// Only return tasks updated on or before this date (YYYY-MM-DD).
@@ -38,6 +44,12 @@ pub struct IndexPageFilters {
     pub search: Option<String>,
     /// Status filter echoed back to the template when present.
     pub status: Option<String>,
+    /// Track filter echoed back to the template when present.
+    pub track: Option<String>,
+    /// Assignee filter echoed back to the template when present.
+    pub assignee: Option<String>,
+    /// Priority filter echoed back to the template when present.
+    pub priority: Option<String>,
     /// Updated-after filter echoed back to the template when present.
     pub updated_after: Option<String>,
     /// Updated-before filter echoed back to the template when present.
@@ -49,6 +61,8 @@ pub struct IndexPageData {
     pub tasks: Paginated<Task>,
     /// Filters currently applied to the task list.
     pub filters: IndexPageFilters,
+    /// Users available in the current hub.
+    pub users: Vec<User>,
     /// Task identifiers that were updated after the user's last visit.
     pub recently_updated_task_ids: Vec<i32>,
 }
@@ -70,6 +84,9 @@ where
         search,
         page,
         status,
+        track,
+        assignee,
+        priority,
         updated_after,
         updated_before,
     } = query;
@@ -81,6 +98,32 @@ where
     if let Some(status_value) = status.as_deref().and_then(parse_status_filter) {
         list_query.filters_mut().status = Some(status_value);
         status_filter_text = Some((<&str>::from(status_value)).to_string());
+    }
+
+    let track_filter_text = track
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    if let Some(track_value) = track_filter_text.as_ref() {
+        list_query.filters_mut().track = Some(track_value.clone());
+    }
+
+    let mut priority_filter_text = None;
+    if let Some(priority_value) = priority.as_deref().and_then(parse_priority_filter) {
+        list_query.filters_mut().priority = Some(priority_value);
+        priority_filter_text = Some((<&str>::from(priority_value)).to_string());
+    }
+
+    let assignee_filter_text = assignee
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    if let Some(value) = assignee_filter_text.as_deref()
+        && let Some(assignee_id) = parse_assignee_filter(value)
+    {
+        list_query.filters_mut().assignee_id = Some(assignee_id);
     }
 
     let mut updated_after_text = None;
@@ -112,6 +155,9 @@ where
     repo.touch_visited_at(user.id, user.hub_id)?;
 
     let (total, tasks) = repo.list_tasks(list_query).map_err(ServiceError::from)?;
+    let (_, users) = repo
+        .list_users(UserListQuery::new(user.hub_id))
+        .map_err(ServiceError::from)?;
 
     let recently_updated_task_ids = visited_at
         .map(|visited| {
@@ -129,6 +175,9 @@ where
     let filters = IndexPageFilters {
         search,
         status: status_filter_text,
+        track: track_filter_text,
+        assignee: assignee_filter_text,
+        priority: priority_filter_text,
         updated_after: updated_after_text,
         updated_before: updated_before_text,
     };
@@ -136,6 +185,7 @@ where
     Ok(IndexPageData {
         tasks,
         filters,
+        users,
         recently_updated_task_ids,
     })
 }
@@ -150,6 +200,27 @@ fn parse_status_filter(input: &str) -> Option<TaskStatus> {
     let status_text: &str = <&str>::from(status);
 
     (status_text == trimmed).then_some(status)
+}
+
+fn parse_priority_filter(input: &str) -> Option<TaskPriority> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let priority = TaskPriority::from(trimmed);
+    let priority_text: &str = <&str>::from(priority);
+
+    (priority_text == trimmed).then_some(priority)
+}
+
+fn parse_assignee_filter(input: &str) -> Option<i32> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    trimmed.parse::<i32>().ok()
 }
 
 fn parse_date_filter(input: &str) -> Option<NaiveDate> {
@@ -721,12 +792,25 @@ mod tests {
                 }
             });
 
+        repo.user_reader
+            .expect_list_users()
+            .times(1)
+            .withf(move |query| {
+                query.hub_id == hub_for_assert
+                    && query.pagination.is_none()
+                    && query.search.is_none()
+            })
+            .returning(|_| Ok((0, Vec::new())));
+
         repo.task_reader
             .expect_list_tasks()
             .times(1)
             .withf(move |query| {
                 assert_eq!(query.filters.hub_id, hub_for_assert);
                 assert_eq!(query.filters.search.as_deref(), Some("alp"));
+                assert!(query.filters.track.is_none());
+                assert!(query.filters.priority.is_none());
+                assert!(query.filters.assignee_id.is_none());
                 match &query.pagination {
                     Some(pagination) => {
                         assert_eq!(pagination.page, 2);
@@ -754,6 +838,10 @@ mod tests {
         };
 
         assert_eq!(data.filters.search.as_deref(), Some("alp"));
+        assert!(data.filters.track.is_none());
+        assert!(data.filters.priority.is_none());
+        assert!(data.filters.assignee.is_none());
+        assert!(data.users.is_empty());
         assert!(data.recently_updated_task_ids.is_empty());
 
         let serialized = match serde_json::to_value(&data.tasks) {
@@ -792,6 +880,9 @@ mod tests {
             search: Some("project".to_string()),
             page: Some(1),
             status: Some("Completed".to_string()),
+            track: Some("Activation".to_string()),
+            assignee: Some("24".to_string()),
+            priority: Some("High".to_string()),
             updated_after: Some("2024-05-01".to_string()),
             updated_before: Some("2024-05-31".to_string()),
         };
@@ -800,6 +891,8 @@ mod tests {
         let expected_hub_id = user.hub_id;
         let expected_name = user.name.clone();
         let expected_user = sample_user_record(7, expected_hub_id, &expected_email, &expected_name);
+        let assignee_user =
+            sample_user_record(24, expected_hub_id, "owner@example.com", "Task Owner");
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -828,6 +921,20 @@ mod tests {
                 }
             });
 
+        repo.user_reader
+            .expect_list_users()
+            .times(1)
+            .withf(move |query| {
+                query.hub_id == expected_hub_id
+                    && query.pagination.is_none()
+                    && query.search.is_none()
+            })
+            .returning({
+                let expected_user = expected_user.clone();
+                let assignee_user = assignee_user.clone();
+                move |_| Ok((2, vec![expected_user.clone(), assignee_user.clone()]))
+            });
+
         let expected_after_date =
             NaiveDate::from_ymd_opt(2024, 5, 1).expect("valid after date provided");
         let expected_before_date =
@@ -849,6 +956,9 @@ mod tests {
                 assert_eq!(filters.hub_id, expected_hub_id);
                 assert_eq!(filters.search.as_deref(), Some("project"));
                 assert_eq!(filters.status, Some(TaskStatus::Completed));
+                assert_eq!(filters.track.as_deref(), Some("Activation"));
+                assert_eq!(filters.priority, Some(TaskPriority::High));
+                assert_eq!(filters.assignee_id, Some(24));
                 assert_eq!(filters.updated_after, Some(expected_after_ts));
                 assert_eq!(filters.updated_before, Some(expected_before_ts));
 
@@ -865,8 +975,13 @@ mod tests {
 
         let result = load_index_page(&repo, &user, query).expect("expected success");
         assert_eq!(result.filters.status.as_deref(), Some("Completed"));
+        assert_eq!(result.filters.track.as_deref(), Some("Activation"));
+        assert_eq!(result.filters.assignee.as_deref(), Some("24"));
+        assert_eq!(result.filters.priority.as_deref(), Some("High"));
         assert_eq!(result.filters.updated_after.as_deref(), Some("2024-05-01"));
         assert_eq!(result.filters.updated_before.as_deref(), Some("2024-05-31"));
+        assert_eq!(result.users.len(), 2);
+        assert_eq!(result.users[1].id, 24);
     }
 
     #[test]
@@ -912,6 +1027,16 @@ mod tests {
                 }
             });
 
+        repo.user_reader
+            .expect_list_users()
+            .times(1)
+            .withf(move |query| {
+                query.hub_id == expected_hub_id
+                    && query.pagination.is_none()
+                    && query.search.is_none()
+            })
+            .returning(|_| Ok((0, Vec::new())));
+
         let fresh_task_id = 2;
         let hub_id_for_tasks = user.hub_id;
 
@@ -930,6 +1055,7 @@ mod tests {
 
         let result = load_index_page(&repo, &user, query).expect("expected success");
 
+        assert!(result.users.is_empty());
         assert_eq!(result.recently_updated_task_ids, vec![fresh_task_id]);
     }
 
