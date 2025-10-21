@@ -14,6 +14,20 @@ use crate::{
 };
 
 impl TaskReader for DieselRepository {
+    fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+        use crate::schema::tasks;
+
+        let mut conn = self.conn()?;
+
+        let tracks = tasks::table
+            .filter(tasks::hub_id.eq(hub_id))
+            .select(tasks::track)
+            .distinct()
+            .order(tasks::track)
+            .load::<Option<String>>(&mut conn)?;
+        Ok(tracks.into_iter().flatten().collect())
+    }
+
     fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTask>> {
         use crate::schema::tasks;
 

@@ -101,77 +101,14 @@
     ) }}
 </div>
 
-<div class="modal fade" id="filtersModal" tabindex="-1" aria-labelledby="filtersModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h1 class="modal-title fs-5" id="filtersModalLabel">Фильтры задач</h1>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <form id="filtersForm" class="modal-body row g-3" method="get" action="/">
-                {% set status_value = filters.status | default(value="") %}
-                {% set track_value = filters.track | default(value="") %}
-                {% set priority_value = filters.priority | default(value="") %}
-                {% set assignee_value = filters.assignee | default(value="") %}
-                {% set updated_after_value = filters.updated_after | default(value="") %}
-                {% set updated_before_value = filters.updated_before | default(value="") %}
-                {% if filters.search %}
-                <input type="hidden" name="search" value="{{ filters.search }}">
-                {% endif %}
-                <div class="col-12">
-                    <label for="filterStatus" class="form-label small text-uppercase text-muted mb-1">Статус</label>
-                    <select id="filterStatus" name="status" class="form-select">
-                        <option value=""{% if status_value == "" %} selected{% endif %}>Все</option>
-                        <option value="Pending"{% if status_value == "Pending" %} selected{% endif %}>В ожидании</option>
-                        <option value="InProgress"{% if status_value == "InProgress" %} selected{% endif %}>В работе</option>
-                        <option value="Blocked"{% if status_value == "Blocked" %} selected{% endif %}>Заблокирована</option>
-                        <option value="Completed"{% if status_value == "Completed" %} selected{% endif %}>Завершена</option>
-                        <option value="Archived"{% if status_value == "Archived" %} selected{% endif %}>Архивирована</option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterTrack" class="form-label small text-uppercase text-muted mb-1">Трек</label>
-                    <input id="filterTrack" name="track" type="text" class="form-control" value="{{ track_value }}">
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterPriority" class="form-label small text-uppercase text-muted mb-1">Приоритет</label>
-                    <select id="filterPriority" name="priority" class="form-select">
-                        <option value=""{% if priority_value == "" %} selected{% endif %}>Любой</option>
-                        <option value="Low"{% if priority_value == "Low" %} selected{% endif %}>Низкий</option>
-                        <option value="Middle"{% if priority_value == "Middle" %} selected{% endif %}>Средний</option>
-                        <option value="High"{% if priority_value == "High" %} selected{% endif %}>Высокий</option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterAssignee" class="form-label small text-uppercase text-muted mb-1">Исполнитель</label>
-                    <select id="filterAssignee" name="assignee" class="form-select">
-                        <option value=""{% if assignee_value == "" %} selected{% endif %}>Любой</option>
-                        {% for option_user in users %}
-                            {% set option_user_id = option_user.id ~ "" %}
-                            <option value="{{ option_user.id }}"{% if assignee_value == option_user_id %} selected{% endif %}>
-                                {{ option_user.name }} ({{ option_user.email }})
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterUpdatedAfter" class="form-label small text-uppercase text-muted mb-1">Обновлена после</label>
-                    <input id="filterUpdatedAfter" name="updated_after" type="date" class="form-control" value="{{ updated_after_value }}">
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterUpdatedBefore" class="form-label small text-uppercase text-muted mb-1">Обновлена до</label>
-                    <input id="filterUpdatedBefore" name="updated_before" type="date" class="form-control" value="{{ updated_before_value }}">
-                </div>
-                <div class="col-12 d-flex flex-wrap gap-2 justify-content-end pt-3">
-                    <button type="submit" class="btn btn-primary">Применить</button>
-                    <a href="/" class="btn btn-outline-secondary">Сбросить</a>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
+{% include 'main/filter_task_modal.html' %}
 {% include 'main/add_task_modal.html' %}
+
+<datalist id="available-tracks">
+    {% for track in tracks %}
+        <option value="{{track}}"></option>
+    {% endfor %}
+</datalist>
 
 {% endblock %}
 

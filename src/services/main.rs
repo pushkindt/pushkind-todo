@@ -67,6 +67,8 @@ pub struct IndexPageData {
     pub users: Vec<User>,
     /// Task identifiers that were updated after the user's last visit.
     pub recently_updated_task_ids: Vec<i32>,
+    /// Available task tracks to use for hints
+    pub tracks: Vec<String>,
 }
 
 /// Loads the tasks list for the main index page.
@@ -184,11 +186,14 @@ where
         updated_before: updated_before_text,
     };
 
+    let tracks = repo.list_task_tracks(user.hub_id)?;
+
     Ok(IndexPageData {
         tasks,
         filters,
         users,
         recently_updated_task_ids,
+        tracks,
     })
 }
 
@@ -533,6 +538,13 @@ mod tests {
         {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
+
+        fn list_task_tracks(
+            &self,
+            hub_id: i32,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<String>> {
+            self.task_reader.list_task_tracks(hub_id)
+        }
     }
 
     impl UserReader for TaskReaderUserRepo {
@@ -765,6 +777,7 @@ mod tests {
         let expected_email = user.email.clone();
         let expected_name = user.name.clone();
         let expected_user = sample_user_record(5, expected_hub, &expected_email, &expected_name);
+        let expected_tracks = vec!["Activation".to_string(), "Retention".to_string()];
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -832,6 +845,18 @@ mod tests {
                 ))
             });
 
+        repo.task_reader
+            .expect_list_task_tracks()
+            .times(1)
+            .returning({
+                let hub_for_tracks = expected_hub;
+                let tracks_for_return = expected_tracks.clone();
+                move |hub_id| {
+                    assert_eq!(hub_id, hub_for_tracks);
+                    Ok(tracks_for_return.clone())
+                }
+            });
+
         let result = load_index_page(&repo, &user, query);
 
         let data = match result {
@@ -845,6 +870,7 @@ mod tests {
         assert!(data.filters.assignee.is_none());
         assert!(data.users.is_empty());
         assert!(data.recently_updated_task_ids.is_empty());
+        assert_eq!(data.tracks, expected_tracks);
 
         let serialized = match serde_json::to_value(&data.tasks) {
             Ok(value) => value,
@@ -895,6 +921,7 @@ mod tests {
         let expected_user = sample_user_record(7, expected_hub_id, &expected_email, &expected_name);
         let assignee_user =
             sample_user_record(24, expected_hub_id, "owner@example.com", "Task Owner");
+        let expected_tracks = vec!["Activation".to_string()];
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -975,6 +1002,17 @@ mod tests {
                 Ok((0, Vec::new()))
             });
 
+        repo.task_reader
+            .expect_list_task_tracks()
+            .times(1)
+            .returning({
+                let expected_tracks = expected_tracks.clone();
+                move |hub_id| {
+                    assert_eq!(hub_id, expected_hub_id);
+                    Ok(expected_tracks.clone())
+                }
+            });
+
         let result = load_index_page(&repo, &user, query).expect("expected success");
         assert_eq!(result.filters.status.as_deref(), Some("Completed"));
         assert_eq!(result.filters.track.as_deref(), Some("Activation"));
@@ -984,6 +1022,7 @@ mod tests {
         assert_eq!(result.filters.updated_before.as_deref(), Some("2024-05-31"));
         assert_eq!(result.users.len(), 2);
         assert_eq!(result.users[1].id, 24);
+        assert_eq!(result.tracks, expected_tracks);
     }
 
     #[test]
@@ -1055,10 +1094,21 @@ mod tests {
             }
         });
 
+        repo.task_reader
+            .expect_list_task_tracks()
+            .times(1)
+            .returning({
+                move |hub_id| {
+                    assert_eq!(hub_id, expected_hub_id);
+                    Ok(Vec::new())
+                }
+            });
+
         let result = load_index_page(&repo, &user, query).expect("expected success");
 
         assert!(result.users.is_empty());
         assert_eq!(result.recently_updated_task_ids, vec![fresh_task_id]);
+        assert!(result.tracks.is_empty());
     }
 
     #[test]

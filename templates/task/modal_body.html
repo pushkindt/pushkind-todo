@@ -48,3 +48,9 @@
         </div>
     </div>
 </form>
+
+<datalist id="available-tracks">
+    {% for track in tracks %}
+        <option value="{{track}}"></option>
+    {% endfor %}
+</datalist>

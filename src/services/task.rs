@@ -130,6 +130,8 @@ pub struct TaskModalData {
     pub assignee: Option<User>,
     /// Users that can be selected as potential assignees.
     pub users: Vec<User>,
+    /// Available task tracks to use for hints
+    pub tracks: Vec<String>,
 }
 
 /// Load the task along with supporting data required by the modal view.
@@ -171,10 +173,13 @@ where
         .list_users(UserListQuery::new(user.hub_id))
         .map_err(ServiceError::from)?;
 
+    let tracks = repo.list_task_tracks(user.hub_id)?;
+
     Ok(TaskModalData {
         task,
         assignee,
         users,
+        tracks,
     })
 }
 
@@ -874,6 +879,10 @@ mod tests {
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
+
+        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+            self.task_reader.list_task_tracks(hub_id)
+        }
     }
 
     impl TaskEventReader for TaskDetailsRepo {
@@ -933,6 +942,10 @@ mod tests {
             hub_id: i32,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
+        }
+
+        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+            self.task_reader.list_task_tracks(hub_id)
         }
     }
 
@@ -1373,6 +1386,10 @@ mod tests {
             _: i32,
             _: i32,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
+            Ok(Vec::new())
+        }
+
+        fn list_task_tracks(&self, _: i32) -> RepositoryResult<Vec<String>> {
             Ok(Vec::new())
         }
     }

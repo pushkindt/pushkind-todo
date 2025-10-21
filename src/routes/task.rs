@@ -64,6 +64,7 @@ pub async fn task_modal(
             context.insert("users", &data.users);
             context.insert("assignee", &data.assignee);
             context.insert("home_url", &server_config.auth_service_url);
+            context.insert("tracks", &data.tracks);
             render_template(&tera, "task/modal_body.html", &context)
         }
         Err(ServiceError::Unauthorized) => {

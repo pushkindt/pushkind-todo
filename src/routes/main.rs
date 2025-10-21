@@ -36,6 +36,7 @@ pub async fn show_index(
             context.insert("filters", &data.filters);
             context.insert("users", &data.users);
             context.insert("recently_updated_task_ids", &data.recently_updated_task_ids);
+            context.insert("tracks", &data.tracks);
             render_template(&tera, "main/index.html", &context)
         }
         Err(ServiceError::Unauthorized) => {

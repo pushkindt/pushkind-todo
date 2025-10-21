@@ -210,9 +210,11 @@ fn test_task_repository_crud() {
 
     let alpha_new = DomainNewTask::new(1, author.id, "Alpha Task")
         .description("first task")
+        .track("Activation")
         .due_date(due_alpha);
     let beta_new = DomainNewTask::new(1, author.id, "Beta Task")
         .description("second task")
+        .track("Retention")
         .status(TaskStatus::InProgress)
         .assign_to(assignee.id)
         .due_date(due_beta);
@@ -225,8 +227,8 @@ fn test_task_repository_crud() {
     assert_eq!(alpha.title, "Alpha Task");
     assert_eq!(beta.status, TaskStatus::InProgress);
     assert_eq!(beta.assigned_to, Some(assignee.id));
-    assert!(alpha.track.is_none());
-    assert!(beta.track.is_none());
+    assert_eq!(alpha.track.as_deref(), Some("Activation"));
+    assert_eq!(beta.track.as_deref(), Some("Retention"));
     assert_eq!(alpha.priority, TaskPriority::Middle);
     assert_eq!(beta.priority, TaskPriority::Middle);
 
@@ -234,6 +236,12 @@ fn test_task_repository_crud() {
         repo.get_task_by_id(alpha.id, 2)
             .expect("cross hub get")
             .is_none()
+    );
+
+    let tracks = repo.list_task_tracks(1).expect("list distinct task tracks");
+    assert_eq!(
+        tracks,
+        vec!["Activation".to_string(), "Retention".to_string()]
     );
 
     let (total, tasks) = repo.list_tasks(TaskListQuery::new(1)).expect("list tasks");

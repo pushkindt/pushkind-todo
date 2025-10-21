@@ -126,6 +126,7 @@ pub trait TaskReader {
         task_id: i32,
         hub_id: i32,
     ) -> RepositoryResult<Vec<TaskAssignment>>;
+    fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>>;
 }
 
 /// Write operations over task records.
