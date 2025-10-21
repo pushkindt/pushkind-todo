@@ -54,22 +54,22 @@
             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2 mt-1" type="button"
                 data-bs-toggle="modal" data-bs-target="#filtersModal">
                 <i class="bi bi-funnel"></i>
-                <span id="activeFiltersBadge" class="badge text-bg-primary {% if status_filter or updated_after or updated_before %}{% else %}d-none{% endif %}">•</span>
+                <span id="activeFiltersBadge" class="badge text-bg-primary {% if filters.status or filters.updated_after or filters.updated_before or filters.track or filters.priority or filters.assignee %}{% else %}d-none{% endif %}">•</span>
             </button>
         </div>
     </div>
 
     <div class="row d-none d-sm-flex fw-bold">
-        <div class="col-sm-2 overflow-hidden">Идентификатор</div>
+        <div class="col-sm overflow-hidden">Трек</div>
         <div class="col-sm overflow-hidden">Название</div>
         <div class="col-sm overflow-hidden">Описание</div>
-        <div class="col-sm-2 overflow-hidden">Статус</div>
+        <div class="col-sm-2 overflow-hidden">Статус/Приоритет</div>
     </div>
     <div id="taskList">
         {% for task in tasks.items %}
         <div class="row my-1 py-1 border-top selectable {% if task.id in recently_updated_task_ids %}task-recent{% endif %}" data-id="{{ task.id }}">
-            <div class="col-sm-2">
-                <strong>{{ task.id }}</strong>
+            <div class="col-sm">
+                <strong>{{ task.track | default(value="—") }}</strong>
                 <div class="text-muted small">
                     <i class="bi bi-clock-history" aria-hidden="true"></i> {{ task.updated_at | date(format="%Y-%m-%d %H:%M") }}
                 </div>
@@ -83,8 +83,14 @@
                 {{ macros::task_description(description=task.description) }}
             </div>
             <div class="col-sm-2">
-                <span class="d-sm-none fw-bold">Статус:</span>
-                {{ macros::task_status(value=task.status) }}
+                <div>
+                    <span class="d-sm-none fw-bold">Статус:</span>
+                    {{ macros::task_status(value=task.status) }}
+                </div>
+                <div>
+                    <span class="d-sm-none fw-bold">Приоритет:</span>
+                    {{ macros::task_priority(value=task.priority) }}
+                </div>
             </div>
         </div>
         {% else %}
@@ -97,56 +103,18 @@
     {{ macros::pagination(
         pages=tasks.pages,
         current_page=tasks.page,
-        search=search | default(value=""),
-        status=status_filter | default(value=""),
-        updated_after=updated_after | default(value=""),
-        updated_before=updated_before | default(value="")
+        filters=filters
     ) }}
 </div>
 
-<div class="modal fade" id="filtersModal" tabindex="-1" aria-labelledby="filtersModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h1 class="modal-title fs-5" id="filtersModalLabel">Фильтры задач</h1>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <form id="filtersForm" class="modal-body row g-3" method="get" action="/">
-                {% set status_value = status_filter | default(value="") %}
-                {% set updated_after_value = updated_after | default(value="") %}
-                {% set updated_before_value = updated_before | default(value="") %}
-                {% if search %}
-                <input type="hidden" name="search" value="{{ search }}">
-                {% endif %}
-                <div class="col-12">
-                    <label for="filterStatus" class="form-label small text-uppercase text-muted mb-1">Статус</label>
-                    <select id="filterStatus" name="status" class="form-select">
-                        <option value=""{% if status_value == "" %} selected{% endif %}>Все</option>
-                        <option value="Pending"{% if status_value == "Pending" %} selected{% endif %}>В ожидании</option>
-                        <option value="InProgress"{% if status_value == "InProgress" %} selected{% endif %}>В работе</option>
-                        <option value="Blocked"{% if status_value == "Blocked" %} selected{% endif %}>Заблокирована</option>
-                        <option value="Completed"{% if status_value == "Completed" %} selected{% endif %}>Завершена</option>
-                        <option value="Archived"{% if status_value == "Archived" %} selected{% endif %}>Архивирована</option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterUpdatedAfter" class="form-label small text-uppercase text-muted mb-1">Обновлена после</label>
-                    <input id="filterUpdatedAfter" name="updated_after" type="date" class="form-control" value="{{ updated_after_value }}">
-                </div>
-                <div class="col-12 col-md-6">
-                    <label for="filterUpdatedBefore" class="form-label small text-uppercase text-muted mb-1">Обновлена до</label>
-                    <input id="filterUpdatedBefore" name="updated_before" type="date" class="form-control" value="{{ updated_before_value }}">
-                </div>
-                <div class="col-12 d-flex flex-wrap gap-2 justify-content-end pt-3">
-                    <button type="submit" class="btn btn-primary">Применить</button>
-                    <a href="/" class="btn btn-outline-secondary">Сбросить</a>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
+{% include 'main/filter_task_modal.html' %}
 {% include 'main/add_task_modal.html' %}
+
+<datalist id="available-tracks">
+    {% for track in tracks %}
+        <option value="{{track}}"></option>
+    {% endfor %}
+</datalist>
 
 {% endblock %}
 
@@ -207,14 +175,29 @@
 
         const params = new URLSearchParams(window.location.search);
         const status = params.get("status") || "";
+        const track = params.get("track") || "";
+        const priority = params.get("priority") || "";
+        const assignee = params.get("assignee") || "";
         const updatedAfter = params.get("updated_after") || "";
         const updatedBefore = params.get("updated_before") || "";
 
         const statusField = document.getElementById("filterStatus");
+        const trackField = document.getElementById("filterTrack");
+        const priorityField = document.getElementById("filterPriority");
+        const assigneeField = document.getElementById("filterAssignee");
         const updatedAfterField = document.getElementById("filterUpdatedAfter");
         const updatedBeforeField = document.getElementById("filterUpdatedBefore");
         if (statusField) {
             statusField.value = status;
+        }
+        if (trackField) {
+            trackField.value = track;
+        }
+        if (priorityField) {
+            priorityField.value = priority;
+        }
+        if (assigneeField) {
+            assigneeField.value = assignee;
         }
         if (updatedAfterField) {
             updatedAfterField.value = updatedAfter;
@@ -224,7 +207,7 @@
         }
 
         const hasActiveFilters = Boolean(
-            status || updatedAfter || updatedBefore
+            status || track || priority || assignee || updatedAfter || updatedBefore
         );
         const badge = document.getElementById("activeFiltersBadge");
         if (badge && hasActiveFilters) {

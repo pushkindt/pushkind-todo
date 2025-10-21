@@ -130,6 +130,8 @@ pub struct TaskModalData {
     pub assignee: Option<User>,
     /// Users that can be selected as potential assignees.
     pub users: Vec<User>,
+    /// Available task tracks to use for hints
+    pub tracks: Vec<String>,
 }
 
 /// Load the task along with supporting data required by the modal view.
@@ -171,10 +173,13 @@ where
         .list_users(UserListQuery::new(user.hub_id))
         .map_err(ServiceError::from)?;
 
+    let tracks = repo.list_task_tracks(user.hub_id)?;
+
     Ok(TaskModalData {
         task,
         assignee,
         users,
+        tracks,
     })
 }
 
@@ -217,6 +222,8 @@ where
         task_id,
         title,
         description,
+        track,
+        priority,
         status,
         due_date,
         assignee,
@@ -243,6 +250,15 @@ where
         Some(body) => updates.description(body),
         None => updates.clear_description(),
     };
+
+    updates = match track {
+        Some(body) => updates.track(body),
+        None => updates.clear_track(),
+    };
+
+    if let Some(priority) = priority {
+        updates = updates.priority(priority);
+    }
 
     updates = match due_date {
         Some(date) => updates.due_date(date),
@@ -447,6 +463,28 @@ fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
             json!({
                 "from": current.description.clone(),
                 "to": updated.description.clone(),
+            }),
+        );
+    }
+
+    if current.track != updated.track {
+        changes.insert(
+            "track".to_string(),
+            json!({
+                "from": current.track.clone(),
+                "to": updated.track.clone(),
+            }),
+        );
+    }
+
+    if current.priority != updated.priority {
+        let from_priority: &'static str = current.priority.into();
+        let to_priority: &'static str = updated.priority.into();
+        changes.insert(
+            "priority".to_string(),
+            json!({
+                "from": from_priority,
+                "to": to_priority,
             }),
         );
     }
@@ -772,7 +810,8 @@ mod tests {
 
     use crate::domain::{
         task::{
-            NewTask as DomainNewTask, TaskAssignment, TaskStatus, UpdateTask as DomainUpdateTask,
+            NewTask as DomainNewTask, TaskAssignment, TaskPriority, TaskStatus,
+            UpdateTask as DomainUpdateTask,
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
         user::User,
@@ -851,6 +890,10 @@ mod tests {
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
+
+        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+            self.task_reader.list_task_tracks(hub_id)
+        }
     }
 
     impl TaskEventReader for TaskDetailsRepo {
@@ -911,6 +954,10 @@ mod tests {
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
+
+        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+            self.task_reader.list_task_tracks(hub_id)
+        }
     }
 
     impl TaskWriter for TaskDeleteRepo {
@@ -962,6 +1009,8 @@ mod tests {
             hub_id,
             title: "Test Task".to_string(),
             description: Some("Detail".to_string()),
+            track: Some("Default Track".to_string()),
+            priority: TaskPriority::default(),
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to,
@@ -1065,13 +1114,20 @@ mod tests {
         updated.title = "Updated".to_string();
         updated.description = Some("New".to_string());
         updated.due_date = Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap());
+        updated.track = Some("Updated Track".to_string());
+        updated.priority = TaskPriority::High;
 
         let payload =
             metadata_event_payload(&current, &updated).expect("expected metadata payload");
 
+        let from_priority: &'static str = current.priority.into();
+        let to_priority: &'static str = updated.priority.into();
+
         let expected = json!({
             "title": {"from": current.title.clone(), "to": updated.title.clone()},
             "description": {"from": current.description.clone(), "to": updated.description.clone()},
+            "track": {"from": current.track.clone(), "to": updated.track.clone()},
+            "priority": {"from": from_priority, "to": to_priority},
             "due_date": {
                 "from": current.due_date.map(|date| date.to_string()),
                 "to": updated.due_date.map(|date| date.to_string())
@@ -1343,6 +1399,10 @@ mod tests {
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             Ok(Vec::new())
         }
+
+        fn list_task_tracks(&self, _: i32) -> RepositoryResult<Vec<String>> {
+            Ok(Vec::new())
+        }
     }
 
     impl TaskWriter for UpdateRepo {
@@ -1363,6 +1423,8 @@ mod tests {
 
             task.title = updates.title.clone();
             task.description = updates.description.clone();
+            task.track = updates.track.clone();
+            task.priority = updates.priority;
             task.status = updates.status;
             task.due_date = updates.due_date;
             task.assigned_to = updates.assigned_to;
@@ -1588,6 +1650,63 @@ mod tests {
                 "due_date": {
                     "from": serde_json::Value::Null,
                     "to": due_date.to_string(),
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": serde_json::Value::Null,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn update_task_updates_track_and_priority() {
+        let task = sample_task(50, 1, None, 3);
+        let repo = UpdateRepo::new(task, Vec::new());
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated title",
+            "status": "Pending",
+            "track": "New Track",
+            "priority": "High",
+        }))
+        .expect("valid form payload");
+
+        let outcome = update_task(&repo, &zmq, &user, 50, form).expect("should update task");
+
+        assert_eq!(outcome.title, "Updated title");
+
+        let stored = repo.task.borrow().clone();
+        assert_eq!(stored.track.as_deref(), Some("New Track"));
+        assert_eq!(stored.priority, TaskPriority::High);
+
+        let events = repo.events.borrow();
+        let metadata_event = events
+            .iter()
+            .find(|event| event.event_type == TaskEventType::MetadataUpdated)
+            .expect("metadata event should be recorded");
+
+        let from_priority: &'static str = TaskPriority::default().into();
+        assert_eq!(
+            metadata_event.event_data,
+            json!({
+                "title": {
+                    "from": "Test Task",
+                    "to": "Updated title",
+                },
+                "description": {
+                    "from": "Detail",
+                    "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": "New Track",
+                },
+                "priority": {
+                    "from": from_priority,
+                    "to": "High",
                 }
             })
         );
@@ -1712,6 +1831,10 @@ mod tests {
                 "description": {
                     "from": "Detail",
                     "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
+                    "to": serde_json::Value::Null,
                 }
             })
         );
@@ -1767,6 +1890,10 @@ mod tests {
                 },
                 "description": {
                     "from": "Detail",
+                    "to": serde_json::Value::Null,
+                },
+                "track": {
+                    "from": "Default Track",
                     "to": serde_json::Value::Null,
                 }
             })

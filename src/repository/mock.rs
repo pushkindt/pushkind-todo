@@ -39,6 +39,7 @@ mock! {
         fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>>;
         fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)>;
         fn list_assignments_for_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<Vec<TaskAssignment>>;
+        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>>;
     }
 }
 

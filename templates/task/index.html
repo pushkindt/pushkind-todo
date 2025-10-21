@@ -32,6 +32,8 @@
                     <dl class="row mb-0">
                         <dt class="col-sm-4">Идентификатор</dt>
                         <dd class="col-sm-8">{{ task.id }}</dd>
+                        <dt class="col-sm-4">Трек</dt>
+                        <dd class="col-sm-8">{{ task.track | default(value="—") }}</dd>
                         <dt class="col-sm-4">Срок</dt>
                         <dd class="col-sm-8">
                             {% if task.due_date %}
@@ -48,6 +50,8 @@
                 </div>
                 <div class="col-md-6">
                     <dl class="row mb-0">
+                        <dt class="col-sm-4">Приоритет</dt>
+                        <dd class="col-sm-8">{{ macros::task_priority(value=task.priority) }}</dd>
                         <dt class="col-sm-4">Создана</dt>
                         <dd class="col-sm-8">{{ task.created_at | date }}</dd>
 

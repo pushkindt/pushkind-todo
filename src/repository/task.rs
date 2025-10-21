@@ -14,6 +14,20 @@ use crate::{
 };
 
 impl TaskReader for DieselRepository {
+    fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+        use crate::schema::tasks;
+
+        let mut conn = self.conn()?;
+
+        let tracks = tasks::table
+            .filter(tasks::hub_id.eq(hub_id))
+            .select(tasks::track)
+            .distinct()
+            .order(tasks::track)
+            .load::<Option<String>>(&mut conn)?;
+        Ok(tracks.into_iter().flatten().collect())
+    }
+
     fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTask>> {
         use crate::schema::tasks;
 
@@ -39,7 +53,9 @@ impl TaskReader for DieselRepository {
                 TaskListFilters {
                     hub_id,
                     assignee_id,
+                    track,
                     status,
+                    priority,
                     search,
                     due_before,
                     due_after,
@@ -50,6 +66,7 @@ impl TaskReader for DieselRepository {
         } = query;
 
         let status_text = status.map(<&'static str>::from);
+        let priority_text = priority.map(<&'static str>::from);
         let search_pattern = search.as_ref().and_then(|term| {
             let trimmed = term.trim();
             if trimmed.is_empty() {
@@ -68,8 +85,20 @@ impl TaskReader for DieselRepository {
                 items = items.filter(tasks::assigned_to.eq(Some(assignee_id)));
             }
 
+            if let Some(track_value) = track
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                items = items.filter(tasks::track.eq(track_value));
+            }
+
             if let Some(status_text) = status_text {
                 items = items.filter(tasks::status.eq(status_text));
+            }
+
+            if let Some(priority_text) = priority_text {
+                items = items.filter(tasks::priority.eq(priority_text));
             }
 
             if let Some(due_before) = due_before {

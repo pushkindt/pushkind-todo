@@ -1,21 +1,20 @@
 {% macro task_status(value) %}
     {% if value %}
-        {% set status_key = value | default(value="pending") | lower %}
-        {% set status_label = status_key %}
+        {% set status_label = value %}
         {% set status_class = "badge text-bg-secondary" %}
-        {% if status_key == "pending" %}
+        {% if value == "Pending" %}
             {% set status_label = "В ожидании" %}
             {% set status_class = "badge text-bg-warning" %}
-        {% elif status_key == "inprogress" %}
+        {% elif value == "InProgress" %}
             {% set status_label = "В работе" %}
             {% set status_class = "badge text-bg-primary" %}
-        {% elif status_key == "blocked" %}
+        {% elif value == "Blocked" %}
             {% set status_label = "Заблокирована" %}
             {% set status_class = "badge text-bg-danger" %}
-        {% elif status_key == "completed" %}
+        {% elif value == "Completed" %}
             {% set status_label = "Завершена" %}
             {% set status_class = "badge text-bg-success" %}
-        {% elif status_key == "archived" %}
+        {% elif value == "Archived" %}
             {% set status_label = "Архивирована" %}
             {% set status_class = "badge text-bg-dark" %}
         {% endif %}
@@ -24,6 +23,26 @@
         <span class="text-muted">—</span>
     {% endif %}
 {% endmacro task_status %}
+
+{% macro task_priority(value) %}
+    {% if value %}
+        {% set status_label = value %}
+        {% set status_class = "badge text-bg-secondary" %}
+        {% if value == "Low" %}
+            {% set status_label = "Низкий" %}
+            {% set status_class = "badge text-bg-secondary" %}
+        {% elif value == "Middle" %}
+            {% set status_label = "Средний" %}
+            {% set status_class = "badge text-bg-primary" %}
+        {% elif value == "High" %}
+            {% set status_label = "Высокий" %}
+            {% set status_class = "badge text-bg-warning" %}
+        {% endif %}
+        <span class="{{ status_class }}">{{ status_label }}</span>
+    {% else %}
+        <span class="text-muted">—</span>
+    {% endif %}
+{% endmacro task_priority %}
 
 {% macro user_popover(user) %}
     {% if user %}
@@ -72,9 +91,25 @@
     </div>
 {% endmacro task_description %}
 
-{% macro pagination(pages, current_page=1, search="", status="", updated_after="", updated_before="") %}
+{% macro pagination(pages, current_page=1, filters=false) %}
     {% if pages | length > 1 %}
         {% set query_suffix = "" %}
+        {% set search = "" %}
+        {% set status = "" %}
+        {% set track = "" %}
+        {% set priority = "" %}
+        {% set assignee = "" %}
+        {% set updated_after = "" %}
+        {% set updated_before = "" %}
+        {% if filters %}
+            {% set search = filters.search | default(value="") %}
+            {% set status = filters.status | default(value="") %}
+            {% set track = filters.track | default(value="") %}
+            {% set priority = filters.priority | default(value="") %}
+            {% set assignee = filters.assignee | default(value="") %}
+            {% set updated_after = filters.updated_after | default(value="") %}
+            {% set updated_before = filters.updated_before | default(value="") %}
+        {% endif %}
         {% if search %}
             {% set encoded_search = search | urlencode %}
             {% set query_suffix = query_suffix ~ "&search=" ~ encoded_search %}
@@ -82,6 +117,18 @@
         {% if status %}
             {% set encoded_status = status | urlencode %}
             {% set query_suffix = query_suffix ~ "&status=" ~ encoded_status %}
+        {% endif %}
+        {% if track %}
+            {% set encoded_track = track | urlencode %}
+            {% set query_suffix = query_suffix ~ "&track=" ~ encoded_track %}
+        {% endif %}
+        {% if assignee %}
+            {% set encoded_assignee = assignee | urlencode %}
+            {% set query_suffix = query_suffix ~ "&assignee=" ~ encoded_assignee %}
+        {% endif %}
+        {% if priority %}
+            {% set encoded_priority = priority | urlencode %}
+            {% set query_suffix = query_suffix ~ "&priority=" ~ encoded_priority %}
         {% endif %}
         {% if updated_after %}
             {% set encoded_after = updated_after | urlencode %}

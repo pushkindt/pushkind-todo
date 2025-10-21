@@ -4,7 +4,10 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use validator::Validate;
 
-use crate::domain::{task::TaskStatus, user::NewUser};
+use crate::domain::{
+    task::{TaskPriority, TaskStatus},
+    user::NewUser,
+};
 
 /// Form payload submitted from the task edit modal.
 #[derive(Debug, Deserialize, Validate)]
@@ -21,6 +24,12 @@ pub struct UpdateTaskForm {
     pub due_date: Option<String>,
     /// Updated status selected in the form.
     pub status: TaskStatus,
+    /// Updated track value submitted in the form.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub track: Option<String>,
+    /// Updated priority level submitted in the form.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub priority: Option<String>,
     /// Assignee data captured by the modal.
     #[serde(flatten, default)]
     pub assignee: AssigneeSelectionForm,
@@ -62,6 +71,8 @@ impl UpdateTaskForm {
             message,
             due_date,
             status,
+            track,
+            priority,
             assignee,
         } = self;
 
@@ -69,6 +80,25 @@ impl UpdateTaskForm {
 
         let due_date = match due_date {
             Some(value) => Some(parse_due_date(&value)?),
+            None => None,
+        };
+
+        let priority = match priority {
+            Some(value) => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    let parsed = TaskPriority::from(trimmed);
+                    let canonical: &str = <&str>::from(parsed);
+
+                    if canonical == trimmed {
+                        Some(parsed)
+                    } else {
+                        return Err(UpdateTaskFormError::InvalidPriority { value });
+                    }
+                }
+            }
             None => None,
         };
 
@@ -86,6 +116,8 @@ impl UpdateTaskForm {
                 }
                 None => None,
             },
+            track,
+            priority,
             status,
             due_date,
             assignee: assignee.into_selection(),
@@ -102,6 +134,10 @@ pub struct TaskUpdateSubmission {
     pub title: String,
     /// Sanitized HTML description or `None` to clear it.
     pub description: Option<String>,
+    /// Desired track update action.
+    pub track: Option<String>,
+    /// Desired priority update, if supplied.
+    pub priority: Option<TaskPriority>,
     /// Desired status for the task after the update.
     pub status: TaskStatus,
     /// Parsed due date value, if provided.
@@ -157,6 +193,8 @@ pub enum UpdateTaskFormError {
     MissingTitle,
     #[error("Invalid due date value '{value}'. Expected format YYYY-MM-DD.")]
     InvalidDueDate { value: String },
+    #[error("Invalid priority value '{value}'.")]
+    InvalidPriority { value: String },
 }
 
 fn parse_due_date(value: &str) -> Result<NaiveDate, UpdateTaskFormError> {
@@ -171,4 +209,65 @@ where
 {
     let value = String::deserialize(deserializer)?;
     Ok(value.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn into_submission_sanitizes_track_and_priority() {
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated",
+            "status": "Pending",
+            "track": "Alpha",
+            "priority": "High",
+        }))
+        .expect("valid form payload");
+
+        let submission = form
+            .into_submission(7)
+            .expect("expected successful conversion");
+
+        assert_eq!(submission.track, Some("Alpha".to_string()));
+
+        assert_eq!(submission.priority, Some(TaskPriority::High));
+    }
+
+    #[test]
+    fn into_submission_clears_track_when_empty() {
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated",
+            "status": "Pending",
+            "track": "",
+        }))
+        .expect("valid form payload");
+
+        let submission = form
+            .into_submission(3)
+            .expect("expected successful conversion");
+
+        assert!(submission.track.is_none());
+        assert!(submission.priority.is_none());
+    }
+
+    #[test]
+    fn into_submission_rejects_invalid_priority() {
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated",
+            "status": "Pending",
+            "priority": "Invalid",
+        }))
+        .expect("valid form payload");
+
+        let err = form
+            .into_submission(5)
+            .expect_err("expected invalid priority");
+
+        match err {
+            UpdateTaskFormError::InvalidPriority { value } => assert_eq!(value, "Invalid"),
+            other => panic!("expected invalid priority error, got {other:?}"),
+        }
+    }
 }

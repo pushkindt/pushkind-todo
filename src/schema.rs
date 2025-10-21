@@ -34,6 +34,8 @@ diesel::table! {
         created_at -> Timestamp,
         updated_at -> Timestamp,
         completed_at -> Nullable<Timestamp>,
+        track -> Nullable<Text>,
+        priority -> Text,
     }
 }
 
