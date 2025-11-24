@@ -49,17 +49,17 @@
 
         {% if value == "Low" %}
             {% set status_label = "Низкий" %}
-            {% set status_class = "badge border border-success text-success" %}
+            {% set status_class = "badge border border-primary text-primary" %}
             {% set status_icon = "bi-arrow-down" %}
 
         {% elif value == "Middle" %}
             {% set status_label = "Средний" %}
-            {% set status_class = "badge border border-primary text-primary" %}
+            {% set status_class = "badge border border-warning text-warning" %}
             {% set status_icon = "bi-arrow-right" %}
 
         {% elif value == "High" %}
             {% set status_label = "Высокий" %}
-            {% set status_class = "badge border border-warning text-warning" %}
+            {% set status_class = "badge border border-danger text-danger" %}
             {% set status_icon = "bi-arrow-up" %}
         {% endif %}
 
