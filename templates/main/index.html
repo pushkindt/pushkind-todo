@@ -59,44 +59,42 @@
         </div>
     </div>
 
-    <div class="row d-none d-md-flex fw-bold">
-        <div class="col-md overflow-hidden">Трек</div>
-        <div class="col-md overflow-hidden">Название</div>
-        <div class="col-md overflow-hidden">Описание</div>
-        <div class="col-md-2 overflow-hidden">Статус Приоритет</div>
+    <div class="row d-none d-lg-flex fw-bold">
+        <div class="col-lg-4 overflow-hidden px-3">Название</div>
+        <div class="col-lg-4 overflow-hidden px-3">Описание</div>
+        <div class="col-lg-4 overflow-hidden text-end px-3">Статус</div>
     </div>
-    <div id="taskList">
+    <div id="taskList" class="list-group">
         {% for task in tasks.items %}
-        <div class="row my-1 py-1 border-top selectable {% if task.id in recently_updated_task_ids %}task-recent{% endif %}" data-id="{{ task.id }}">
-            <div class="col-md">
-                <strong>{{ task.track | default(value="—") }}</strong>
-                <div class="text-muted small">
-                    <i class="bi bi-clock-history" aria-hidden="true"></i> {{ task.updated_at | date(format="%Y-%m-%d %H:%M") }}
+
+            <div class="list-group-item py-3 selectable" data-id="{{task.id}}">
+                <div class="row align-items-center">
+                    <!-- Left side: title + meta + description -->
+                    <div class="col-12 col-lg-4">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <span class="badge text-bg-secondary">{{ task.track }}</span>
+                            <span class="fw-semibold">{{ task.title }}</span>
+                        </div>
+                        <div class="text-muted small mb-1">
+                            <i class="bi bi-clock"></i> {{ task.updated_at | date(format="%Y-%m-%d %H:%M") }}
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-4">
+                        {{ macros::task_description(description=task.description) }}
+                    </div>
+                    <!-- Right side: status + priority -->
+                    <div class="col-12 col-lg-4 text-lg-end mt-2 mt-lg-0">
+                        <div class="d-flex d-lg-block gap-2 justify-content-start justify-content-lg-end">
+                            {{ macros::task_status(value=task.status) }}
+                            {{ macros::task_priority(value=task.priority) }}
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="col-md">
-                <span class="d-md-none fw-bold">Название:</span>
-                {{ task.title }}
-            </div>
-            <div class="col-md">
-                <span class="d-md-none fw-bold">Описание:</span>
-                {{ macros::task_description(description=task.description) }}
-            </div>
-            <div class="col-md-2">
-                <div>
-                    <span class="d-md-none fw-bold">Статус:</span>
-                    {{ macros::task_status(value=task.status) }}
-                </div>
-                <div>
-                    <span class="d-md-none fw-bold">Приоритет:</span>
-                    {{ macros::task_priority(value=task.priority) }}
-                </div>
-            </div>
-        </div>
         {% else %}
-        <div class="alert alert-warning my-2" role="alert">
-            Нет задач для отображения.
-        </div>
+            <div class="alert alert-warning my-2" role="alert">
+                Нет задач для отображения.
+            </div>
         {% endfor %}
     </div>
 
