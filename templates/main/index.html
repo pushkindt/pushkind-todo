@@ -67,7 +67,7 @@
     <div id="taskList" class="list-group">
         {% for task in tasks.items %}
 
-            <div class="list-group-item py-3 selectable" data-id="{{task.id}}">
+            <div class="list-group-item py-3 selectable {% if task.id in recently_updated_task_ids %}task-recent{% endif %}" data-id="{{task.id}}">
                 <div class="row align-items-center">
                     <!-- Left side: title + meta + description -->
                     <div class="col-12 col-lg-4">
