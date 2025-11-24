@@ -1,48 +1,78 @@
 {% macro task_status(value) %}
     {% if value %}
         {% set status_label = value %}
-        {% set status_class = "badge text-bg-secondary" %}
+        {% set status_class = "badge border border-secondary text-secondary" %}
+        {% set status_icon = "" %}
+
         {% if value == "Pending" %}
             {% set status_label = "В ожидании" %}
-            {% set status_class = "badge text-bg-warning" %}
+            {% set status_class = "badge border border-warning text-warning" %}
+            {% set status_icon = "bi-question-circle" %}
+
         {% elif value == "InProgress" %}
             {% set status_label = "В работе" %}
-            {% set status_class = "badge text-bg-primary" %}
+            {% set status_class = "badge border border-primary text-primary" %}
+            {% set status_icon = "bi-clock" %}
+
         {% elif value == "Blocked" %}
             {% set status_label = "Заблокирована" %}
-            {% set status_class = "badge text-bg-danger" %}
+            {% set status_class = "badge border border-danger text-danger" %}
+            {% set status_icon = "bi-ban" %}
+
         {% elif value == "Completed" %}
             {% set status_label = "Завершена" %}
-            {% set status_class = "badge text-bg-success" %}
+            {% set status_class = "badge border border-success text-success" %}
+            {% set status_icon = "bi-check2-circle" %}
+
         {% elif value == "Archived" %}
             {% set status_label = "Архивирована" %}
-            {% set status_class = "badge text-bg-dark" %}
+            {% set status_class = "badge border border-dark text-dark" %}
+            {% set status_icon = "bi-archive" %}
         {% endif %}
-        <span class="{{ status_class }}">{{ status_label }}</span>
+
+        <span class="{{ status_class }}">
+            {% if status_icon %}
+                <i class="bi {{ status_icon }}"></i>
+            {% endif %}
+            {{ status_label }}
+        </span>
     {% else %}
         <span class="text-muted">—</span>
     {% endif %}
-{% endmacro task_status %}
+{% endmacro %}
 
 {% macro task_priority(value) %}
     {% if value %}
         {% set status_label = value %}
-        {% set status_class = "badge text-bg-secondary" %}
+        {% set status_class = "badge border border-secondary text-secondary" %}
+        {% set status_icon = "" %}
+
         {% if value == "Low" %}
             {% set status_label = "Низкий" %}
-            {% set status_class = "badge text-bg-secondary" %}
+            {% set status_class = "badge border border-success text-success" %}
+            {% set status_icon = "bi-arrow-down" %}
+
         {% elif value == "Middle" %}
             {% set status_label = "Средний" %}
-            {% set status_class = "badge text-bg-primary" %}
+            {% set status_class = "badge border border-primary text-primary" %}
+            {% set status_icon = "bi-arrow-right" %}
+
         {% elif value == "High" %}
             {% set status_label = "Высокий" %}
-            {% set status_class = "badge text-bg-warning" %}
+            {% set status_class = "badge border border-warning text-warning" %}
+            {% set status_icon = "bi-arrow-up" %}
         {% endif %}
-        <span class="{{ status_class }}">{{ status_label }}</span>
+
+        <span class="{{ status_class }}">
+            {% if status_icon %}
+                <i class="bi {{ status_icon }}"></i>
+            {% endif %}
+            {{ status_label }}
+        </span>
     {% else %}
         <span class="text-muted">—</span>
     {% endif %}
-{% endmacro task_priority %}
+{% endmacro %}
 
 {% macro user_popover(user) %}
     {% if user %}
@@ -86,7 +116,7 @@
 {% endmacro metadata_value %}
 
 {% macro task_description(description, truncate_content=true) %}
-    <div class="p-1 border rounded {% if truncate_content %}content-truncate{% endif %}">
+    <div class="{% if truncate_content %}content-truncate{% endif %}">
         {{ description | default(value="—") | safe }}
     </div>
 {% endmacro task_description %}
