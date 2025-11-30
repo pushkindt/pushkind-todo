@@ -47,5 +47,5 @@ jobs:
           scp -r ./assets/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./templates/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./migrations/ cicd@todo.pushkind.com:/var/www10/html/
-          ssh cicd@todo.pushkind.com "cd /var/www10/html/ && /home/cicd/.cargo/bin/diesel migration run"
+          ssh cicd@todo.pushkind.com "cd /var/www10/html/ && /home/cicd/.cargo/bin/diesel migration run --database-url app.db"
           ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl start pushkind-todo.service"

@@ -5,7 +5,7 @@ use pushkind_common::domain::emailer::email::{NewEmail, NewEmailRecipient};
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
-use serde::Serialize;
+
 use serde_json::{Value, json};
 use validator::Validate;
 
@@ -22,28 +22,7 @@ use crate::repository::{
 use crate::services::{ServiceError, ServiceResult};
 
 use super::notifications;
-
-/// Task event accompanied by the optional author information.
-#[derive(Debug, Serialize)]
-pub struct TaskEventWithAuthor {
-    /// Persisted event data.
-    pub event: TaskEvent,
-    /// Author of the event, if present and accessible within the hub.
-    pub author: Option<User>,
-}
-
-/// Aggregated task information with the related event history.
-#[derive(Debug, Serialize)]
-pub struct TaskDetails {
-    /// Task metadata shown on the details page.
-    pub task: Task,
-    /// Author of the task.
-    pub author: User,
-    /// Task assignee when available in the current hub.
-    pub assignee: Option<User>,
-    /// Ordered list of events associated with the task.
-    pub events: Vec<TaskEventWithAuthor>,
-}
+use crate::dto::task::{TaskDetails, TaskEventWithAuthor, TaskModalData};
 
 /// Load a task and its events for the provided user, enriching with user data.
 pub fn load_task_details<R>(
@@ -119,19 +98,6 @@ where
         assignee,
         events,
     })
-}
-
-/// Data needed to render the task modal for editing.
-#[derive(Debug, Serialize)]
-pub struct TaskModalData {
-    /// Task being edited in the modal.
-    pub task: Task,
-    /// Optional assignee for the task when available in the current hub.
-    pub assignee: Option<User>,
-    /// Users that can be selected as potential assignees.
-    pub users: Vec<User>,
-    /// Available task tracks to use for hints
-    pub tracks: Vec<String>,
 }
 
 /// Load the task along with supporting data required by the modal view.

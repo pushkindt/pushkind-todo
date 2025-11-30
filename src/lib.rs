@@ -19,6 +19,7 @@ use crate::routes::main::{add_task, show_index, tasks_upload};
 use crate::routes::task::{add_task_comment, delete_task, show_task, task_modal, update_task};
 
 pub mod domain;
+pub mod dto;
 pub mod forms;
 pub mod models;
 pub mod repository;
