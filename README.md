@@ -101,23 +101,32 @@ by swapping in the `mockall`-based fakes from `src/repository/mock.rs`.
 - `diesel-cli` with SQLite support (`cargo install diesel_cli --no-default-features --features sqlite`)
 - SQLite 3 installed on your system
 
-### Environment
+### Configuration
 
-The service reads configuration from environment variables. The most important
-ones are:
+Settings are layered via the [`config`](https://crates.io/crates/config) crate in the following order (later entries override earlier ones):
 
-| Variable | Description | Default |
+1. `config/default.yaml` (checked in)
+2. `config/{APP_ENV}.yaml` where `APP_ENV` defaults to `local`
+3. Environment variables prefixed with `APP_` (loaded automatically from a `.env` file via `dotenvy`)
+
+Key settings you may want to override:
+
+| Environment variable | Description | Default |
 | --- | --- | --- |
-| `DATABASE_URL` | Path to the SQLite database file | `app.db` |
-| `SECRET_KEY` | 32-byte secret for signing cookies | generated at runtime |
-| `AUTH_SERVICE_URL` | Base URL of the Pushkind authentication service | _required_ |
-| `PORT` | HTTP port | `8080` |
-| `ADDRESS` | Interface to bind | `127.0.0.1` |
-| `DOMAIN` | Cookie domain (without protocol) | `localhost` |
-| `ZMQ_EMAILER_PUB` | ZeroMQ endpoint for queuing outbound emails | `tcp://127.0.0.1:5557` |
+| `APP_SECRET` | 64-byte secret used to sign cookies and flash messages | _required_ |
+| `APP_DATABASE_URL` | Path to the SQLite database file | `app.db` |
+| `APP_ADDRESS` | Interface to bind | `127.0.0.1` |
+| `APP_PORT` | HTTP port | `8080` when `APP_ENV=local` |
+| `APP_DOMAIN` | Cookie domain (without protocol) | `test.me` when `APP_ENV=local` |
+| `APP_TEMPLATES_DIR` | Glob pattern for templates consumed by Tera | `templates/**/*` |
+| `APP_ZMQ_EMAILER_PUB` | ZeroMQ PUB endpoint for outgoing email events | `tcp://127.0.0.1:5557` |
+| `APP_AUTH_SERVICE_URL` | Base URL of the Pushkind authentication service | _required_ |
 
-Create a `.env` file if you want these values loaded automatically via
-[`dotenvy`](https://crates.io/crates/dotenvy).
+Switch to the production profile with `APP_ENV=prod` or provide your own
+`config/{env}.yaml`. Environment variables always win over YAML values, so a
+local `.env` file containing `APP_SECRET=<64-byte key>` (generate with
+`openssl rand -base64 64`) and any overrides will take effect without changing
+the checked-in config files.
 
 ### Database
 
@@ -139,7 +148,8 @@ Start the HTTP server with:
 cargo run
 ```
 
-The server listens on `http://127.0.0.1:8080` by default and serves static
+The server listens on `http://127.0.0.1:8080` by default (from
+`config/local.yaml`) and serves static
 assets from `./assets` in addition to the Tera-powered HTML pages. Authentication
 and authorization are enforced via the Pushkind auth service and the
 `SERVICE_ACCESS_ROLE` constant.
