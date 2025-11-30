@@ -10,6 +10,7 @@ Group=www-data
 
 # From Supervisor's directory/command
 WorkingDirectory=/var/www10/html
+Environment=APP_ENV=prod
 ExecStart=/var/www10/html/pushkind-todo
 
 # Supervisor: autorestart=true

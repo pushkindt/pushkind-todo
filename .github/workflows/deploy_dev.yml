@@ -43,6 +43,7 @@ jobs:
         run: |
           ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl stop pushkind-todo.service"
           scp ./target/release/pushkind-todo cicd@todo.pushkind.com:/var/www10/html/
+          scp -r ./config/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./assets/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./templates/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./migrations/ cicd@todo.pushkind.com:/var/www10/html/

@@ -2,9 +2,10 @@ use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
 /// Status assigned to a task as it moves through its lifecycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TaskStatus {
     /// Task has been created but no work has started yet.
+    #[default]
     Pending,
     /// Work is actively happening on the task.
     InProgress,
@@ -16,12 +17,6 @@ pub enum TaskStatus {
     Archived,
 }
 
-impl Default for TaskStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
-}
-
 impl TaskStatus {
     /// Whether the status represents a terminal state where no additional work is required.
     pub fn is_terminal(self) -> bool {
@@ -30,20 +25,15 @@ impl TaskStatus {
 }
 
 /// Priority assigned to a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TaskPriority {
     /// Task is low priority and can be handled after other work.
     Low,
     /// Task is middle priority and should be addressed in a timely manner.
+    #[default]
     Middle,
     /// Task is high priority and requires immediate attention.
     High,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        Self::Middle
-    }
 }
 
 impl From<TaskPriority> for &'static str {
