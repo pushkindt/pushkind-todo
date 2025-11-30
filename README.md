@@ -58,9 +58,11 @@ Comprehensive API documentation generated with `cargo doc` is published at
 The codebase follows a clean, layered structure so that business logic can be
 exercised and tested without going through the web framework:
 
-- **Domain (`src/domain`)** – Type-safe models that describe tasks, task events,
-  and users. Builder-style helpers make it easy to construct new payloads while
-  capturing timestamps and sanitising inputs early.
+- **Domain (`src/domain`)** – Type-safe models for hubs, menus, roles, and users.
+  Domain types never validate or normalize; they assume inputs are already
+  cleaned and transformed by forms/services. Domain structs use strongly typed
+  fields (e.g., `UserEmail`, `HubId`, `UserName`) so the
+  type system enforces the invariants of each value.
 - **Repository (`src/repository`)** – Traits that describe the persistence
   contract and a Diesel-backed implementation (`DieselRepository`) that speaks to
   a SQLite database. Each module translates between Diesel models and domain
