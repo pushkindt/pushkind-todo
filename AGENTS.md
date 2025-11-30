@@ -45,13 +45,25 @@ cargo fmt --all -- --check
 - Define error enums with `thiserror` inside the crate that owns the failure and
   return `RepositoryResult<T>` / `ServiceResult<T>` from repository and service
   functions.
+- Services should return DTO-level structs when handing data to routes or other
+  crates; perform domain-to-DTO conversion inside the service layer to keep
+  handlers thin.
 - Service functions should accept trait bounds (e.g., `TaskReader + TaskWriter`)
   so the `DieselRepository` and `mockall`-powered fakes remain interchangeable.
+- Domain structs must not perform validation or normalization (e.g., no
+  `to_lowercase`); assume inputs are already sanitized and transformed by forms
+  or services before reaching the domain layer.
 - Return domain types or simple success markers (`()`, counts, etc.) from
   services; keep HTTP concerns out of the service layer.
 - Sanitize and validate user input early using `validator` and `ammonia` helpers
   from the form layer.
+- Perform trimming, case normalisation, and other input clean-up before
+  constructing domain types; domain builders assume callers supply sanitised
+  values.
 - Prefer dependency injection through function parameters over global state.
+- For Diesel update models, avoid nested optionals; prefer single-layer `Option<T>`
+  fields and rely on `#[diesel(treat_none_as_null = true)]` when nullable columns
+  need to be cleared.
 - Document all public APIs and any breaking changes.
 
 ## Database Guidelines

@@ -1,8 +1,8 @@
 use actix_web::{HttpResponse, Responder, get, web};
 use pushkind_common::domain::auth::AuthenticatedUser;
 
+use crate::dto::main::IndexQuery;
 use crate::repository::DieselRepository;
-use crate::services::main::IndexQuery;
 use crate::services::{ServiceError, main as main_service};
 
 #[get("/v1/tasks")]
