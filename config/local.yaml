@@ -1,0 +1,3 @@
+domain: test.me
+port: 8080
+auth_service_url: http://auth3.test.me:8081
