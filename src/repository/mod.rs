@@ -72,11 +72,12 @@ pub struct TaskListQuery {
 
 impl TaskListQuery {
     /// Construct a query scoped to the provided hub using default filters.
-    pub fn new(hub_id: i32) -> Self {
-        Self {
+    pub fn new(hub_id: i32) -> Result<Self, crate::domain::types::TypeConstraintError> {
+        let hub_id = crate::domain::types::HubId::new(hub_id)?;
+        Ok(Self {
             filters: TaskListFilters::new(hub_id),
             pagination: None,
-        }
+        })
     }
 
     /// Replace the filters used by the query.

@@ -6,6 +6,7 @@ use validator::Validate;
 
 use crate::domain::{
     task::{TaskPriority, TaskStatus},
+    types::{TaskDescription, TaskTitle, TaskTrack},
     user::NewUser,
 };
 
@@ -76,7 +77,9 @@ impl UpdateTaskForm {
             assignee,
         } = self;
 
-        let title = title.ok_or(UpdateTaskFormError::MissingTitle)?;
+        let title = title
+            .ok_or(UpdateTaskFormError::MissingTitle)
+            .and_then(|t| TaskTitle::new(t).map_err(|_| UpdateTaskFormError::MissingTitle))?;
 
         let due_date = match due_date {
             Some(value) => Some(parse_due_date(&value)?),
@@ -111,12 +114,12 @@ impl UpdateTaskForm {
                     if sanitized.trim().is_empty() {
                         None
                     } else {
-                        Some(sanitized)
+                        Some(TaskDescription::from(sanitized))
                     }
                 }
                 None => None,
             },
-            track,
+            track: track.and_then(|t| TaskTrack::new(t.trim()).ok()),
             priority,
             status,
             due_date,
@@ -131,11 +134,11 @@ pub struct TaskUpdateSubmission {
     /// Identifier of the task being updated.
     pub task_id: i32,
     /// Updated title provided in the form.
-    pub title: String,
+    pub title: TaskTitle,
     /// Sanitized HTML description or `None` to clear it.
-    pub description: Option<String>,
+    pub description: Option<TaskDescription>,
     /// Desired track update action.
-    pub track: Option<String>,
+    pub track: Option<TaskTrack>,
     /// Desired priority update, if supplied.
     pub priority: Option<TaskPriority>,
     /// Desired status for the task after the update.
@@ -157,12 +160,17 @@ pub struct AssigneeSelection {
 
 impl AssigneeSelection {
     /// Convert the selection into a new user payload.
-    pub fn into_new_user(self, hub_id: i32) -> NewUser {
-        NewUser {
-            hub_id,
-            name: self.name,
-            email: self.email.to_lowercase(),
-        }
+    pub fn into_new_user(
+        self,
+        hub_id: i32,
+    ) -> Result<NewUser, crate::domain::types::TypeConstraintError> {
+        use crate::domain::types::{HubId, UserEmail, UserName};
+
+        let hub_id = HubId::new(hub_id)?;
+        let name = UserName::new(self.name)?;
+        let email = UserEmail::new(self.email)?;
+
+        Ok(NewUser::new(hub_id, name, email))
     }
 }
 
@@ -195,6 +203,8 @@ pub enum UpdateTaskFormError {
     InvalidDueDate { value: String },
     #[error("Invalid priority value '{value}'.")]
     InvalidPriority { value: String },
+    #[error("Invalid track value")]
+    InvalidTrack,
 }
 
 fn parse_due_date(value: &str) -> Result<NaiveDate, UpdateTaskFormError> {
@@ -230,8 +240,8 @@ mod tests {
             .into_submission(7)
             .expect("expected successful conversion");
 
-        assert_eq!(submission.track, Some("Alpha".to_string()));
-
+        assert_eq!(submission.track.as_ref().map(|t| t.as_str()), Some("Alpha"));
+        assert_eq!(submission.title.as_str(), "Updated");
         assert_eq!(submission.priority, Some(TaskPriority::High));
     }
 

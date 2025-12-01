@@ -7,6 +7,12 @@ use crate::{
     repository::{DieselRepository, UserListQuery, UserReader, UserWriter},
 };
 
+impl From<crate::domain::types::TypeConstraintError> for RepositoryError {
+    fn from(err: crate::domain::types::TypeConstraintError) -> Self {
+        RepositoryError::ValidationError(err.to_string())
+    }
+}
+
 impl UserReader for DieselRepository {
     fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainUser>> {
         use crate::schema::users;
@@ -20,7 +26,7 @@ impl UserReader for DieselRepository {
             .first::<DbUser>(&mut conn)
             .optional()?;
 
-        Ok(user.map(Into::into))
+        Ok(user.map(|u| u.try_into()).transpose()?)
     }
 
     fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<DomainUser>> {
@@ -36,7 +42,7 @@ impl UserReader for DieselRepository {
             .first::<DbUser>(&mut conn)
             .optional()?;
 
-        Ok(user.map(Into::into))
+        Ok(user.map(|u| u.try_into()).transpose()?)
     }
 
     fn list_users(&self, query: UserListQuery) -> RepositoryResult<(usize, Vec<DomainUser>)> {
@@ -81,7 +87,13 @@ impl UserReader for DieselRepository {
             .select(DbUser::as_select())
             .load::<DbUser>(&mut conn)?;
 
-        Ok((total, db_users.into_iter().map(Into::into).collect()))
+        Ok((
+            total,
+            db_users
+                .into_iter()
+                .map(|u| u.try_into())
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
     }
 }
 
@@ -102,7 +114,7 @@ impl UserWriter for DieselRepository {
             .set(&db_update_user)
             .get_result::<DbUser>(&mut conn)?;
 
-        Ok(db_user.into())
+        Ok(db_user.try_into()?)
     }
 
     fn update_user(
@@ -125,7 +137,7 @@ impl UserWriter for DieselRepository {
             .returning(DbUser::as_returning())
             .get_result::<DbUser>(&mut conn)?;
 
-        Ok(updated.into())
+        Ok(updated.try_into()?)
     }
 
     fn delete_user(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()> {

@@ -40,7 +40,7 @@ impl TaskReader for DieselRepository {
             .first::<DbTask>(&mut conn)
             .optional()?;
 
-        Ok(task.map(Into::into))
+        Ok(task.map(|t| t.try_into()).transpose()?)
     }
 
     fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<DomainTask>)> {
@@ -67,30 +67,19 @@ impl TaskReader for DieselRepository {
 
         let status_text = status.map(<&'static str>::from);
         let priority_text = priority.map(<&'static str>::from);
-        let search_pattern = search.as_ref().and_then(|term| {
-            let trimmed = term.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(format!("%{}%", trimmed))
-            }
-        });
+        let search_pattern = search.as_ref().map(|term| format!("%{}%", term.as_str()));
 
         let query_builder = || {
             let mut items = tasks::table
-                .filter(tasks::hub_id.eq(hub_id))
+                .filter(tasks::hub_id.eq(hub_id.get()))
                 .into_boxed::<diesel::sqlite::Sqlite>();
 
             if let Some(assignee_id) = assignee_id {
-                items = items.filter(tasks::assigned_to.eq(Some(assignee_id)));
+                items = items.filter(tasks::assigned_to.eq(Some(assignee_id.get())));
             }
 
-            if let Some(track_value) = track
-                .as_ref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-            {
-                items = items.filter(tasks::track.eq(track_value));
+            if let Some(track_value) = track.as_ref() {
+                items = items.filter(tasks::track.eq(track_value.as_str()));
             }
 
             if let Some(status_text) = status_text {
@@ -144,7 +133,13 @@ impl TaskReader for DieselRepository {
             .select(DbTask::as_select())
             .load::<DbTask>(&mut conn)?;
 
-        Ok((total, db_tasks.into_iter().map(Into::into).collect()))
+        Ok((
+            total,
+            db_tasks
+                .into_iter()
+                .map(|t| t.try_into())
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
     }
 
     fn list_assignments_for_task(
@@ -163,7 +158,10 @@ impl TaskReader for DieselRepository {
             .select(DbTaskAssignment::as_select())
             .load::<DbTaskAssignment>(&mut conn)?;
 
-        Ok(assignments.into_iter().map(Into::into).collect())
+        Ok(assignments
+            .into_iter()
+            .map(|a| a.try_into())
+            .collect::<Result<Vec<_>, _>>()?)
     }
 }
 
@@ -174,8 +172,8 @@ impl TaskWriter for DieselRepository {
         let mut conn = self.conn()?;
 
         let author_exists = users::table
-            .filter(users::id.eq(new_task.author_id))
-            .filter(users::hub_id.eq(new_task.hub_id))
+            .filter(users::id.eq(new_task.author_id.get()))
+            .filter(users::hub_id.eq(new_task.hub_id.get()))
             .select(users::id)
             .first::<i32>(&mut conn)
             .optional()?;
@@ -186,8 +184,8 @@ impl TaskWriter for DieselRepository {
 
         if let Some(assignee_id) = new_task.assigned_to {
             let assignee = users::table
-                .filter(users::id.eq(assignee_id))
-                .filter(users::hub_id.eq(new_task.hub_id))
+                .filter(users::id.eq(assignee_id.get()))
+                .filter(users::hub_id.eq(new_task.hub_id.get()))
                 .select(users::id)
                 .first::<i32>(&mut conn)
                 .optional()?;
@@ -204,7 +202,7 @@ impl TaskWriter for DieselRepository {
             .returning(DbTask::as_returning())
             .get_result::<DbTask>(&mut conn)?;
 
-        Ok(created.into())
+        Ok(created.try_into()?)
     }
 
     fn update_task(
@@ -219,7 +217,7 @@ impl TaskWriter for DieselRepository {
 
         if let Some(assignee_id) = updates.assigned_to {
             let assignee = users::table
-                .filter(users::id.eq(assignee_id))
+                .filter(users::id.eq(assignee_id.get()))
                 .filter(users::hub_id.eq(hub_id))
                 .select(users::id)
                 .first::<i32>(&mut conn)
@@ -241,7 +239,7 @@ impl TaskWriter for DieselRepository {
             .returning(DbTask::as_returning())
             .get_result::<DbTask>(&mut conn)?;
 
-        Ok(updated.into())
+        Ok(updated.try_into()?)
     }
 
     fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {

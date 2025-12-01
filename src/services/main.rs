@@ -44,7 +44,9 @@ where
     } = query;
 
     let page = page.unwrap_or(1);
-    let mut list_query = TaskListQuery::new(user.hub_id).paginate(page, DEFAULT_ITEMS_PER_PAGE);
+    let mut list_query = TaskListQuery::new(user.hub_id)
+        .map_err(ServiceError::from)?
+        .paginate(page, DEFAULT_ITEMS_PER_PAGE);
 
     let mut status_filter_text = None;
     if let Some(status_value) = status.as_deref().and_then(parse_status_filter) {
@@ -57,8 +59,10 @@ where
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string());
-    if let Some(track_value) = track_filter_text.as_ref() {
-        list_query.filters_mut().track = Some(track_value.clone());
+    if let Some(track_value) = track_filter_text.as_ref()
+        && let Ok(track) = crate::domain::types::TaskTrack::new(track_value)
+    {
+        list_query.filters_mut().track = Some(track);
     }
 
     let mut priority_filter_text = None;
@@ -74,8 +78,9 @@ where
         .map(|value| value.to_string());
     if let Some(value) = assignee_filter_text.as_deref()
         && let Some(assignee_id) = parse_assignee_filter(value)
+        && let Ok(user_id) = crate::domain::types::UserId::new(assignee_id)
     {
-        list_query.filters_mut().assignee_id = Some(assignee_id);
+        list_query.filters_mut().assignee_id = Some(user_id);
     }
 
     let mut updated_after_text = None;
@@ -96,19 +101,21 @@ where
 
     if let Some(value) = search.as_ref()
         && !value.trim().is_empty()
+        && let Ok(search_term) = crate::domain::types::SearchTerm::new(value)
     {
-        list_query.filters_mut().search = Some(value.clone());
+        list_query.filters_mut().search = Some(search_term);
     }
 
-    let new_user = user.into();
+    let new_user: crate::domain::user::NewUser =
+        user.try_into().map_err(|_| ServiceError::Internal)?;
     let user = repo.create_or_update_user(&new_user)?;
     let visited_at = user.visited_at;
 
-    repo.touch_visited_at(user.id, user.hub_id)?;
+    repo.touch_visited_at(user.id.get(), user.hub_id.get())?;
 
     let (total, tasks) = repo.list_tasks(list_query).map_err(ServiceError::from)?;
     let (_, users) = repo
-        .list_users(UserListQuery::new(user.hub_id))
+        .list_users(UserListQuery::new(user.hub_id.get()))
         .map_err(ServiceError::from)?;
 
     let recently_updated_task_ids = visited_at
@@ -116,7 +123,7 @@ where
             tasks
                 .iter()
                 .filter(|task| task.updated_at > visited)
-                .map(|task| task.id)
+                .map(|task| task.id.get())
                 .collect()
         })
         .unwrap_or_default();
@@ -134,7 +141,7 @@ where
         updated_before: updated_before_text,
     };
 
-    let tracks = repo.list_task_tracks(user.hub_id)?;
+    let tracks = repo.list_task_tracks(user.hub_id.get())?;
 
     Ok(IndexPageData {
         tasks,
@@ -216,7 +223,8 @@ where
         return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
     }
 
-    let new_user = user.into();
+    let new_user: crate::domain::user::NewUser =
+        user.try_into().map_err(|_| ServiceError::Internal)?;
     let author = repo.create_or_update_user(&new_user)?;
 
     let AddTaskForm {
@@ -237,12 +245,24 @@ where
 
     let priority = AddTaskForm::parse_priority(priority);
 
-    let mut new_task =
-        build_new_task_payload(user.hub_id, author.id, title, message, track, priority);
+    let mut new_task = build_new_task_payload(
+        user.hub_id,
+        author.id.get(),
+        title,
+        message,
+        track,
+        priority,
+    )
+    .map_err(|err| {
+        log::error!("Failed to build task payload: {err}");
+        ServiceError::Form("Ошибка валидации формы".to_string())
+    })?;
 
     let assignee_user = match assignee.into_selection() {
         Some(selection) => {
-            let new_user = selection.into_new_user(user.hub_id);
+            let new_user = selection
+                .into_new_user(user.hub_id)
+                .map_err(|_| ServiceError::Internal)?;
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -264,7 +284,7 @@ where
         log::error!("Failed to queue task-created email: {err}");
     }
 
-    repo.touch_visited_at(author.id, author.hub_id)?;
+    repo.touch_visited_at(author.id.get(), author.hub_id.get())?;
 
     Ok(created)
 }
@@ -282,10 +302,11 @@ where
         return Err(ServiceError::Unauthorized);
     }
 
-    let new_user = user.into();
+    let new_user: crate::domain::user::NewUser =
+        user.try_into().map_err(|_| ServiceError::Internal)?;
     let author = repo.create_or_update_user(&new_user)?;
 
-    let new_tasks = form.parse(user.hub_id, author.id).map_err(|err| {
+    let new_tasks = form.parse(user.hub_id, author.id.get()).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
         ServiceError::Form("Ошибка при парсинге задач".to_string())
     })?;
@@ -299,7 +320,7 @@ where
         })?;
     }
 
-    repo.touch_visited_at(author.id, author.hub_id)?;
+    repo.touch_visited_at(author.id.get(), author.hub_id.get())?;
 
     Ok(created_count)
 }
@@ -311,25 +332,27 @@ fn build_task_created_email(
     actor: &AuthenticatedUser,
 ) -> Option<NewEmail> {
     let actor_email = actor.email.trim().to_lowercase();
-    let assignee_email = assignee.email.trim().to_lowercase();
+    let assignee_email = assignee.email.as_str().trim().to_lowercase();
 
     if actor_email == assignee_email {
         return None;
     }
 
-    let sanitized_title = notifications::sanitize_text(&task.title);
-    let sanitized_author_name = notifications::sanitize_text(&author.name);
+    let sanitized_title = notifications::sanitize_text(task.title.as_str());
+    let sanitized_author_name = notifications::sanitize_text(author.name.as_str());
 
     let mut message = format!(
         "<p>Вам назначена новая задача <strong>{}</strong> от {} ({}).</p>",
-        sanitized_title, sanitized_author_name, author.email
+        sanitized_title,
+        sanitized_author_name,
+        author.email.as_str()
     );
 
     if let Some(description) = &task.description
-        && !description.trim().is_empty()
+        && !description.as_str().trim().is_empty()
     {
         message.push_str("<hr>");
-        message.push_str(description);
+        message.push_str(description.as_str());
     }
 
     let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee");
@@ -362,6 +385,7 @@ mod tests {
         NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskPriority,
         TaskStatus, UpdateTask as DomainUpdateTask,
     };
+    use crate::domain::types::{HubId, UserEmail, UserName};
     use crate::domain::user::User;
     use crate::forms::task::AssigneeSelectionForm;
     use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
@@ -379,17 +403,18 @@ mod tests {
     }
 
     fn sample_task(id: i32, hub_id: i32, title: &str) -> Task {
+        use crate::domain::types::{HubId, TaskId, TaskTitle, UserId};
         Task {
-            id,
-            hub_id,
-            title: title.to_string(),
+            id: TaskId::new(id).unwrap(),
+            hub_id: HubId::new(hub_id).unwrap(),
+            title: TaskTitle::new(title).unwrap(),
             description: None,
             track: None,
             priority: TaskPriority::Middle,
             status: TaskStatus::Pending,
             due_date: None,
             assigned_to: None,
-            author_id: 1,
+            author_id: UserId::new(1).unwrap(),
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
@@ -408,11 +433,12 @@ mod tests {
     }
 
     fn sample_user_record(id: i32, hub_id: i32, email: &str, name: &str) -> User {
+        use crate::domain::types::{HubId, UserEmail, UserId, UserName};
         User {
-            id,
-            hub_id,
-            name: name.to_string(),
-            email: email.to_string(),
+            id: UserId::new(id).unwrap(),
+            hub_id: HubId::new(hub_id).unwrap(),
+            name: UserName::new(name).unwrap(),
+            email: UserEmail::new(email).unwrap(),
             visited_at: Some(fixed_datetime()),
         }
     }
@@ -741,9 +767,12 @@ mod tests {
                 let expected_name = expected_name.clone();
                 let expected_user = expected_user.clone();
                 move |new_user| {
-                    assert_eq!(new_user.hub_id, expected_hub_id);
-                    assert_eq!(new_user.email, expected_email);
-                    assert_eq!(new_user.name, expected_name);
+                    use crate::domain::types::HubId;
+                    assert_eq!(new_user.hub_id, HubId::new(expected_hub_id).unwrap());
+                    use crate::domain::types::UserEmail;
+                    assert_eq!(new_user.email, UserEmail::new(&expected_email).unwrap());
+                    use crate::domain::types::UserName;
+                    assert_eq!(new_user.name, UserName::new(&expected_name).unwrap());
                     Ok(expected_user.clone())
                 }
             });
@@ -754,8 +783,8 @@ mod tests {
             .returning({
                 let expected_user = expected_user.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, expected_user.id);
-                    assert_eq!(hub_id, expected_user.hub_id);
+                    assert_eq!(user_id, expected_user.id.get());
+                    assert_eq!(hub_id, expected_user.hub_id.get());
                     Ok(())
                 }
             });
@@ -774,8 +803,12 @@ mod tests {
             .expect_list_tasks()
             .times(1)
             .withf(move |query| {
-                assert_eq!(query.filters.hub_id, hub_for_assert);
-                assert_eq!(query.filters.search.as_deref(), Some("alp"));
+                use crate::domain::types::HubId;
+                assert_eq!(query.filters.hub_id, HubId::new(hub_for_assert).unwrap());
+                assert_eq!(
+                    query.filters.search.as_ref().map(|s| s.as_str()),
+                    Some("alp")
+                );
                 assert!(query.filters.track.is_none());
                 assert!(query.filters.priority.is_none());
                 assert!(query.filters.assignee_id.is_none());
@@ -871,7 +904,14 @@ mod tests {
         let expected_email = user.email.clone();
         let expected_hub_id = user.hub_id;
         let expected_name = user.name.clone();
-        let expected_user = sample_user_record(7, expected_hub_id, &expected_email, &expected_name);
+        let expected_email = UserEmail::new(expected_email).unwrap();
+        let expected_name = UserName::new(expected_name).unwrap();
+        let expected_user = sample_user_record(
+            7,
+            expected_hub_id,
+            expected_email.as_str(),
+            expected_name.as_str(),
+        );
         let assignee_user =
             sample_user_record(24, expected_hub_id, "owner@example.com", "Task Owner");
         let expected_tracks = vec!["Activation".to_string()];
@@ -897,8 +937,8 @@ mod tests {
             .returning({
                 let expected_user = expected_user.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, expected_user.id);
-                    assert_eq!(hub_id, expected_user.hub_id);
+                    assert_eq!(user_id, expected_user.id.get());
+                    assert_eq!(hub_id, expected_user.hub_id.get());
                     Ok(())
                 }
             });
@@ -935,12 +975,18 @@ mod tests {
                     pagination,
                 } = query;
 
-                assert_eq!(filters.hub_id, expected_hub_id);
-                assert_eq!(filters.search.as_deref(), Some("project"));
+                assert_eq!(filters.hub_id, HubId::new(expected_hub_id).unwrap());
+                assert_eq!(
+                    filters.search.as_ref().map(|term| term.as_str()),
+                    Some("project")
+                );
                 assert_eq!(filters.status, Some(TaskStatus::Completed));
-                assert_eq!(filters.track.as_deref(), Some("Activation"));
+                assert_eq!(
+                    filters.track.as_ref().map(|track| track.as_str()),
+                    Some("Activation")
+                );
                 assert_eq!(filters.priority, Some(TaskPriority::High));
-                assert_eq!(filters.assignee_id, Some(24));
+                assert_eq!(filters.assignee_id.map(|id| id.get()), Some(24));
                 assert_eq!(filters.updated_after, Some(expected_after_ts));
                 assert_eq!(filters.updated_before, Some(expected_before_ts));
 
@@ -974,7 +1020,7 @@ mod tests {
         assert_eq!(result.filters.updated_after.as_deref(), Some("2024-05-01"));
         assert_eq!(result.filters.updated_before.as_deref(), Some("2024-05-31"));
         assert_eq!(result.users.len(), 2);
-        assert_eq!(result.users[1].id, 24);
+        assert_eq!(result.users[1].id.get(), 24);
         assert_eq!(result.tracks, expected_tracks);
     }
 
@@ -989,10 +1035,15 @@ mod tests {
         };
 
         let visited_at = fixed_datetime();
-        let expected_email = user.email.clone();
+        let expected_email = UserEmail::new(user.email.clone()).unwrap();
         let expected_hub_id = user.hub_id;
-        let expected_name = user.name.clone();
-        let user_record = sample_user_record(42, expected_hub_id, &expected_email, &expected_name);
+        let expected_name = UserName::new(user.name.clone()).unwrap();
+        let user_record = sample_user_record(
+            42,
+            expected_hub_id,
+            expected_email.as_str(),
+            expected_name.as_str(),
+        );
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -1015,8 +1066,8 @@ mod tests {
             .returning({
                 let user_record = user_record.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, user_record.id);
-                    assert_eq!(hub_id, user_record.hub_id);
+                    assert_eq!(user_id, user_record.id.get());
+                    assert_eq!(hub_id, user_record.hub_id.get());
                     Ok(())
                 }
             });
@@ -1125,8 +1176,9 @@ mod tests {
         let expected_author_id = author.id;
         let hub_for_return = expected_hub;
 
-        let expected_email_for_create = expected_email_lower.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let author_for_create = author.clone();
 
         repo.user_reader.expect_get_user_by_email().never();
@@ -1135,7 +1187,7 @@ mod tests {
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
@@ -1145,8 +1197,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id);
-                assert_eq!(hub_id, expected_hub);
+                assert_eq!(user_id, expected_author_id.get());
+                assert_eq!(hub_id, expected_hub_id.get());
                 Ok(())
             });
 
@@ -1154,8 +1206,8 @@ mod tests {
             .expect_create_task()
             .times(1)
             .withf(move |task| {
-                assert_eq!(task.hub_id, expected_hub);
-                assert_eq!(task.title, "alpha");
+                assert_eq!(task.hub_id, expected_hub_id);
+                assert_eq!(task.title.as_str(), "alpha");
                 assert_eq!(task.description, None);
                 assert_eq!(task.status, TaskStatus::Pending);
                 assert!(task.due_date.is_none());
@@ -1172,8 +1224,8 @@ mod tests {
             Err(err) => panic!("expected success, got error: {err}"),
         };
 
-        assert_eq!(created.hub_id, expected_hub);
-        assert_eq!(created.title, "alpha");
+        assert_eq!(created.hub_id, HubId::new(expected_hub).unwrap());
+        assert_eq!(created.title.as_str(), "alpha");
     }
 
     #[test]
@@ -1202,6 +1254,7 @@ mod tests {
 
         let assignee_record = sample_user_record(11, expected_hub, &assignee_email, &assignee_name);
         let expected_assignee_id = assignee_record.id;
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
 
         repo.user_reader.expect_get_user_by_email().never();
 
@@ -1209,7 +1262,6 @@ mod tests {
             .expect_create_or_update_user()
             .times(2)
             .returning({
-                let expected_hub_id = expected_hub;
                 let expected_author_email = expected_email_lower.clone();
                 let expected_author_name = expected_name.clone();
                 let author_for_return = author.clone();
@@ -1219,16 +1271,17 @@ mod tests {
                 move |new_user| {
                     assert_eq!(new_user.hub_id, expected_hub_id);
 
-                    if new_user.email == expected_author_email {
-                        assert_eq!(new_user.name, expected_author_name);
+                    if new_user.email.as_str() == expected_author_email {
+                        assert_eq!(new_user.name.as_str(), expected_author_name);
                         Ok(author_for_return.clone())
-                    } else if new_user.email == expected_assignee_email {
-                        assert_eq!(new_user.name, expected_assignee_name);
+                    } else if new_user.email.as_str() == expected_assignee_email {
+                        assert_eq!(new_user.name.as_str(), expected_assignee_name);
                         Ok(assignee_for_return.clone())
                     } else {
                         panic!(
                             "unexpected user payload received: {} / {}",
-                            new_user.email, new_user.name
+                            new_user.email.as_str(),
+                            new_user.name.as_str()
                         );
                     }
                 }
@@ -1238,8 +1291,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id);
-                assert_eq!(hub_id, expected_hub);
+                assert_eq!(user_id, expected_author_id.get());
+                assert_eq!(hub_id, expected_hub_id.get());
                 Ok(())
             });
 
@@ -1247,12 +1300,12 @@ mod tests {
             .expect_create_task()
             .times(1)
             .withf({
-                let expected_hub_id = expected_hub;
+                let expected_hub_id = HubId::new(expected_hub).unwrap();
                 let expected_author_id_capture = expected_author_id;
                 let expected_assignee_id_capture = expected_assignee_id;
                 move |task| {
                     assert_eq!(task.hub_id, expected_hub_id);
-                    assert_eq!(task.title, "alpha");
+                    assert_eq!(task.title.as_str(), "alpha");
                     assert_eq!(task.description, None);
                     assert_eq!(task.status, TaskStatus::Pending);
                     assert!(task.due_date.is_none());
@@ -1275,7 +1328,7 @@ mod tests {
             Err(err) => panic!("expected success, got error: {err}"),
         };
 
-        assert_eq!(created.hub_id, expected_hub);
+        assert_eq!(created.hub_id, HubId::new(expected_hub).unwrap());
         assert_eq!(created.assigned_to, Some(expected_assignee_id));
     }
 
@@ -1334,17 +1387,17 @@ mod tests {
             .returning({
                 let author_record = author_record.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, author_record.id);
-                    assert_eq!(hub_id, author_record.hub_id);
+                    assert_eq!(user_id, author_record.id.get());
+                    assert_eq!(hub_id, author_record.hub_id.get());
                     Ok(())
                 }
             });
 
         let created_task = Task {
-            id: 51,
-            hub_id: expected_hub,
-            title: "New Task".to_string(),
-            description: Some("Task details".to_string()),
+            id: crate::domain::types::TaskId::new(51).unwrap(),
+            hub_id: HubId::new(expected_hub).unwrap(),
+            title: crate::domain::types::TaskTitle::new("New Task").unwrap(),
+            description: Some(crate::domain::types::TaskDescription::from("Task details")),
             track: None,
             priority: TaskPriority::Middle,
             status: TaskStatus::Pending,
@@ -1386,8 +1439,8 @@ mod tests {
                 assert_eq!(email.recipients.len(), 1);
 
                 let recipient = &email.recipients[0];
-                assert_eq!(recipient.address, assignee_record.email);
-                assert_eq!(recipient.name, assignee_record.name);
+                assert_eq!(recipient.address, assignee_record.email.as_str());
+                assert_eq!(recipient.name, assignee_record.name.as_str());
                 assert_eq!(
                     recipient
                         .fields
@@ -1424,12 +1477,13 @@ mod tests {
 
         let expected_hub = user.hub_id;
         let expected_email_lower = user.email.to_lowercase();
-        let expected_email_for_create = expected_email_lower.clone();
         let expected_name = user.name.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let created_author =
             sample_user_record(13, expected_hub, &expected_email_lower, &expected_name);
         let author_id = created_author.id;
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
         let hub_for_return = expected_hub;
         let created_author_for_create = created_author.clone();
 
@@ -1439,7 +1493,7 @@ mod tests {
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(created_author_for_create.clone())
@@ -1449,8 +1503,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, author_id);
-                assert_eq!(hub_id, expected_hub);
+                assert_eq!(user_id, author_id.get());
+                assert_eq!(hub_id, expected_hub_id.get());
                 Ok(())
             });
 
@@ -1458,7 +1512,7 @@ mod tests {
             .expect_create_task()
             .times(1)
             .withf(move |task| {
-                assert_eq!(task.hub_id, expected_hub);
+                assert_eq!(task.hub_id, expected_hub_id);
                 assert_eq!(task.author_id, author_id);
                 true
             })
@@ -1489,8 +1543,9 @@ mod tests {
         let author = sample_user_record(8, expected_hub, &expected_email_lower, &expected_name);
         let expected_author_id = author.id;
 
-        let expected_email_for_create = expected_email_lower.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let author_for_create = author.clone();
 
         repo.user_reader.expect_get_user_by_email().never();
@@ -1499,7 +1554,7 @@ mod tests {
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
@@ -1511,7 +1566,7 @@ mod tests {
             .expect_create_task()
             .times(1)
             .withf(move |task| {
-                assert_eq!(task.hub_id, expected_hub);
+                assert_eq!(task.hub_id, expected_hub_id);
                 assert_eq!(task.author_id, expected_author_id);
                 true
             })
@@ -1557,8 +1612,9 @@ foo,bar
         let expected_name = user.name.clone();
         let author = sample_user_record(9, expected_hub, &expected_email_lower, &expected_name);
 
-        let expected_email_for_create = expected_email_lower.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let author_for_create = author.clone();
 
         repo.user_reader.expect_get_user_by_email().never();
@@ -1567,7 +1623,7 @@ foo,bar
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
@@ -1607,8 +1663,9 @@ beta,
         let titles_for_closure = std::sync::Arc::clone(&captured_titles);
         let hub_for_return = expected_hub;
 
-        let expected_email_for_create = expected_email_lower.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let author_for_create = author.clone();
 
         repo.user_reader.expect_get_user_by_email().never();
@@ -1617,7 +1674,7 @@ beta,
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(author_for_create.clone())
@@ -1627,8 +1684,8 @@ beta,
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id);
-                assert_eq!(hub_id, expected_hub);
+                assert_eq!(user_id, expected_author_id.get());
+                assert_eq!(hub_id, expected_hub_id.get());
                 Ok(())
             });
 
@@ -1636,7 +1693,7 @@ beta,
             .expect_create_task()
             .times(2)
             .returning(move |task| {
-                assert_eq!(task.hub_id, hub_for_return);
+                assert_eq!(task.hub_id, expected_hub_id);
                 assert!(task.description.is_none());
                 assert!(task.due_date.is_none());
                 assert!(task.assigned_to.is_none());
@@ -1650,7 +1707,7 @@ beta,
                 titles.push(task.title.clone());
                 let task_id = titles.len() as i32;
 
-                Ok(sample_task(task_id, hub_for_return, &task.title))
+                Ok(sample_task(task_id, hub_for_return, task.title.as_str()))
             });
 
         let result = upload_tasks(&repo, &user, &mut form);
@@ -1668,8 +1725,8 @@ beta,
         };
 
         assert_eq!(titles.len(), 2);
-        assert!(titles.iter().any(|title| title == "alpha"));
-        assert!(titles.iter().any(|title| title == "beta"));
+        assert!(titles.iter().any(|title| title.as_str() == "alpha"));
+        assert!(titles.iter().any(|title| title.as_str() == "beta"));
     }
 
     #[test]
@@ -1684,13 +1741,14 @@ alpha,
 
         let expected_hub = user.hub_id;
         let expected_email_lower = user.email.to_lowercase();
-        let expected_email_for_create = expected_email_lower.clone();
         let expected_name = user.name.clone();
-        let expected_name_for_create = expected_name.clone();
+        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
+        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
         let created_author =
             sample_user_record(21, expected_hub, &expected_email_lower, &expected_name);
         let author_id = created_author.id;
         let hub_for_return = expected_hub;
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
         let created_author_for_create = created_author.clone();
 
         repo.user_reader.expect_get_user_by_email().never();
@@ -1699,7 +1757,7 @@ alpha,
             .expect_create_or_update_user()
             .times(1)
             .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub);
+                assert_eq!(new_user.hub_id, expected_hub_id);
                 assert_eq!(new_user.name, expected_name_for_create);
                 assert_eq!(new_user.email, expected_email_for_create);
                 Ok(created_author_for_create.clone())
@@ -1709,8 +1767,8 @@ alpha,
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, author_id);
-                assert_eq!(hub_id, expected_hub);
+                assert_eq!(user_id, author_id.get());
+                assert_eq!(hub_id, expected_hub_id.get());
                 Ok(())
             });
 
@@ -1718,9 +1776,9 @@ alpha,
             .expect_create_task()
             .times(1)
             .returning(move |task| {
-                assert_eq!(task.hub_id, hub_for_return);
+                assert_eq!(task.hub_id, expected_hub_id);
                 assert_eq!(task.author_id, author_id);
-                Ok(sample_task(1, hub_for_return, &task.title))
+                Ok(sample_task(1, hub_for_return, task.title.as_str()))
             });
 
         let result = upload_tasks(&repo, &user, &mut form);

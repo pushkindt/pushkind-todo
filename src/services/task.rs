@@ -13,6 +13,7 @@ use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::{
     task::{Task, TaskStatus, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent, TaskEventType},
+    types::UserId,
     user::User,
 };
 use crate::forms::task::{NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskForm};
@@ -42,8 +43,9 @@ where
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
+    let author_id = task.author_id.get();
     let author = repo
-        .get_user_by_id(task.author_id, user.hub_id)
+        .get_user_by_id(author_id, user.hub_id)
         .map_err(ServiceError::from)?
         .ok_or_else(|| {
             log::error!(
@@ -55,7 +57,7 @@ where
         })?;
 
     let assignee = match task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id, user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
             Ok(user) => user,
             Err(err) => return Err(ServiceError::from(err)),
         },
@@ -63,17 +65,17 @@ where
     };
 
     let events = repo
-        .list_events_for_task(task.id, user.hub_id)
+        .list_events_for_task(task.id.get(), user.hub_id)
         .map_err(ServiceError::from)?;
 
-    let mut author_cache: HashMap<i32, User> = HashMap::new();
+    let mut author_cache: HashMap<UserId, User> = HashMap::new();
     for event in &events {
         if let Some(author_id) = event.user_id {
             if author_cache.contains_key(&author_id) {
                 continue;
             }
 
-            match repo.get_user_by_id(author_id, user.hub_id) {
+            match repo.get_user_by_id(author_id.get(), user.hub_id) {
                 Ok(Some(user)) => {
                     author_cache.insert(author_id, user);
                 }
@@ -119,7 +121,7 @@ where
         .ok_or(ServiceError::NotFound)?;
 
     let assignee = match task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id, user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
             Ok(Some(user)) => Some(user),
             Ok(None) => {
                 log::warn!(
@@ -202,7 +204,9 @@ where
 
     let assignee_user = match assignee {
         Some(assignee) => {
-            let new_user = assignee.into_new_user(user.hub_id);
+            let new_user = assignee
+                .into_new_user(user.hub_id)
+                .map_err(ServiceError::from)?;
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -249,14 +253,14 @@ where
     let assignment_event_data = if current_task.assigned_to != updated.assigned_to {
         let previous_assignee = match current_task.assigned_to {
             Some(assignee_id) => repo
-                .get_user_by_id(assignee_id, user.hub_id)
+                .get_user_by_id(assignee_id.get(), user.hub_id)
                 .map_err(ServiceError::from)?,
             None => None,
         };
 
         let new_assignee = match updated.assigned_to {
             Some(assignee_id) => repo
-                .get_user_by_id(assignee_id, user.hub_id)
+                .get_user_by_id(assignee_id.get(), user.hub_id)
                 .map_err(ServiceError::from)?,
             None => None,
         };
@@ -272,7 +276,7 @@ where
         || assignment_event_data.is_some()
         || metadata_event_data.is_some()
     {
-        let new_user = user.into();
+        let new_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
         let actor = repo.create_or_update_user(&new_user)?;
 
         if let Some(data) = status_event_data {
@@ -305,16 +309,16 @@ where
             repo.record_event(&event).map_err(ServiceError::from)?;
         }
 
-        repo.touch_visited_at(actor.id, actor.hub_id)?;
+        repo.touch_visited_at(actor.id.get(), actor.hub_id.get())?;
     }
 
     let author_user = repo
-        .get_user_by_id(updated.author_id, user.hub_id)
+        .get_user_by_id(updated.author_id.get(), user.hub_id)
         .map_err(ServiceError::from)?;
 
     let assignee_user = match updated.assigned_to {
         Some(assignee_id) => repo
-            .get_user_by_id(assignee_id, user.hub_id)
+            .get_user_by_id(assignee_id.get(), user.hub_id)
             .map_err(ServiceError::from)?,
         None => None,
     };
@@ -324,7 +328,7 @@ where
         let mut seen_actor_ids = HashSet::new();
 
         let events = repo
-            .list_events_for_task(updated.id, user.hub_id)
+            .list_events_for_task(updated.id.get(), user.hub_id)
             .map_err(ServiceError::from)?;
 
         for event in events {
@@ -333,7 +337,7 @@ where
                     continue;
                 }
 
-                match repo.get_user_by_id(actor_id, user.hub_id) {
+                match repo.get_user_by_id(actor_id.get(), user.hub_id) {
                     Ok(Some(actor)) => actors.push(actor),
                     Ok(None) => {
                         log::warn!(
@@ -367,8 +371,8 @@ where
 
 fn apply_assignment_updates(
     updates: UpdateTask,
-    current_assigned_to: Option<i32>,
-    new_assignee_id: Option<i32>,
+    current_assigned_to: Option<UserId>,
+    new_assignee_id: Option<UserId>,
 ) -> UpdateTask {
     match new_assignee_id {
         Some(assignee_id) if current_assigned_to != Some(assignee_id) => {
@@ -490,14 +494,14 @@ fn build_task_updated_email(
     actor: &AuthenticatedUser,
 ) -> Option<NewEmail> {
     let actor_email = actor.email.trim().to_lowercase();
-    let sanitized_title = notifications::sanitize_text(&task.title);
+    let sanitized_title = notifications::sanitize_text(task.title.as_str());
     let sanitized_actor_name = notifications::sanitize_text(&actor.name);
 
     let mut recipients = Vec::new();
     let mut seen = HashSet::new();
 
     if let Some(author) = author {
-        let email = author.email.trim().to_lowercase();
+        let email = author.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
             recipients.push(notifications::task_recipient(
                 task,
@@ -509,7 +513,7 @@ fn build_task_updated_email(
     }
 
     if let Some(assignee) = assignee {
-        let email = assignee.email.trim().to_lowercase();
+        let email = assignee.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
             recipients.push(notifications::task_recipient(
                 task,
@@ -521,7 +525,7 @@ fn build_task_updated_email(
     }
 
     for event_actor in event_actors {
-        let email = event_actor.email.trim().to_lowercase();
+        let email = event_actor.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
             recipients.push(notifications::task_recipient(
                 task,
@@ -549,18 +553,19 @@ fn build_task_updated_email(
     }
 
     if let Some(assignee) = assignee {
-        let sanitized_assignee = notifications::sanitize_text(&assignee.name);
+        let sanitized_assignee = notifications::sanitize_text(assignee.name.as_str());
         message.push_str(&format!(
             "<p>Текущий исполнитель: {} ({}).</p>",
-            sanitized_assignee, assignee.email
+            sanitized_assignee,
+            assignee.email.as_str()
         ));
     }
 
     if let Some(description) = &task.description
-        && !description.trim().is_empty()
+        && !description.as_str().trim().is_empty()
     {
         message.push_str("<hr>");
-        message.push_str(description);
+        message.push_str(description.as_str());
     }
 
     Some(NewEmail {
@@ -600,13 +605,13 @@ where
         .map_err(ServiceError::from)?
         .ok_or(ServiceError::NotFound)?;
 
-    let new_user = user.into();
+    let new_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
     let comment_author = repo.create_or_update_user(&new_user)?;
 
     let submission = form.into_submission();
     let comment_text = submission.text;
     let event = NewTaskEvent::new(
-        task_id,
+        task.id,
         Some(comment_author.id),
         TaskEventType::Comment,
         json!({ "text": comment_text.clone() }),
@@ -614,29 +619,29 @@ where
 
     let recorded = repo.record_event(&event).map_err(ServiceError::from)?;
 
-    repo.touch_visited_at(comment_author.id, comment_author.hub_id)?;
+    repo.touch_visited_at(comment_author.id.get(), comment_author.hub_id.get())?;
 
     let task_author = repo
-        .get_user_by_id(task.author_id, user.hub_id)
+        .get_user_by_id(task.author_id.get(), user.hub_id)
         .map_err(ServiceError::from)?;
 
     let task_assignee = match task.assigned_to {
         Some(assignee_id) => repo
-            .get_user_by_id(assignee_id, user.hub_id)
+            .get_user_by_id(assignee_id.get(), user.hub_id)
             .map_err(ServiceError::from)?,
         None => None,
     };
 
     let task_events = repo
-        .list_events_for_task(task.id, user.hub_id)
+        .list_events_for_task(task.id.get(), user.hub_id)
         .map_err(ServiceError::from)?;
 
-    let actor_email = comment_author.email.trim().to_lowercase();
+    let actor_email = comment_author.email.as_str().trim().to_lowercase();
     let mut seen = HashSet::new();
     let mut recipients = Vec::new();
 
     if let Some(author) = task_author {
-        let email = author.email.trim().to_lowercase();
+        let email = author.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
             recipients.push(notifications::task_recipient(
                 &task,
@@ -648,7 +653,7 @@ where
     }
 
     if let Some(assignee) = task_assignee {
-        let email = assignee.email.trim().to_lowercase();
+        let email = assignee.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
             recipients.push(notifications::task_recipient(
                 &task,
@@ -670,10 +675,10 @@ where
 
     for actor_id in event_actor_ids {
         if let Some(actor) = repo
-            .get_user_by_id(actor_id, user.hub_id)
+            .get_user_by_id(actor_id.get(), user.hub_id)
             .map_err(ServiceError::from)?
         {
-            let email = actor.email.trim().to_lowercase();
+            let email = actor.email.as_str().trim().to_lowercase();
             if email != actor_email && seen.insert(email.clone()) {
                 recipients.push(notifications::task_recipient(
                     &task,
@@ -704,13 +709,15 @@ fn build_task_comment_email(
         return None;
     }
 
-    let sanitized_title = notifications::sanitize_text(&task.title);
-    let sanitized_author = notifications::sanitize_text(&comment_author.name);
+    let sanitized_title = notifications::sanitize_text(task.title.as_str());
+    let sanitized_author = notifications::sanitize_text(comment_author.name.as_str());
     let sanitized_body = notifications::sanitize_text(comment_body);
 
     let mut message = format!(
         "<p>Пользователь {} ({}) оставил комментарий к задаче <strong>{}</strong>.</p>",
-        sanitized_author, comment_author.email, sanitized_title
+        sanitized_author,
+        comment_author.email.as_str(),
+        sanitized_title
     );
 
     if !sanitized_body.is_empty() {
@@ -724,7 +731,7 @@ fn build_task_comment_email(
         attachment: None,
         attachment_name: None,
         attachment_mime: None,
-        hub_id: comment_author.hub_id,
+        hub_id: comment_author.hub_id.get(),
         recipients,
     })
 }
@@ -780,6 +787,7 @@ mod tests {
             UpdateTask as DomainUpdateTask,
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
+        types::{TaskId, UserId},
         user::User,
     };
     use crate::forms::task::NewTaskCommentForm;
@@ -970,26 +978,28 @@ mod tests {
     }
 
     fn sample_task(id: i32, hub_id: i32, assigned_to: Option<i32>, author_id: i32) -> Task {
+        use crate::domain::types::{HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId};
         Task {
-            id,
-            hub_id,
-            title: "Test Task".to_string(),
-            description: Some("Detail".to_string()),
-            track: Some("Default Track".to_string()),
+            id: TaskId::new(id).unwrap(),
+            hub_id: HubId::new(hub_id).unwrap(),
+            title: TaskTitle::new("Test Task").unwrap(),
+            description: Some(TaskDescription::from("Detail")),
+            track: Some(TaskTrack::new("Default Track").unwrap()),
             priority: TaskPriority::default(),
             status: TaskStatus::Pending,
             due_date: None,
-            assigned_to,
-            author_id,
+            assigned_to: assigned_to.map(|value| UserId::new(value).unwrap()),
+            author_id: UserId::new(author_id).unwrap(),
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
         }
     }
 
-    fn sample_event(id: i32, task_id: i32, user_id: Option<i32>) -> TaskEvent {
+    fn sample_event(id: i32, task_id: TaskId, user_id: Option<UserId>) -> TaskEvent {
+        use crate::domain::types::TaskEventId;
         TaskEvent {
-            id,
+            id: TaskEventId::new(id).unwrap(),
             task_id,
             user_id,
             event_type: TaskEventType::Comment,
@@ -999,11 +1009,12 @@ mod tests {
     }
 
     fn sample_user(id: i32, hub_id: i32, name: &str, email: &str) -> User {
+        use crate::domain::types::{HubId, UserEmail, UserId, UserName};
         User {
-            id,
-            hub_id,
-            name: name.to_string(),
-            email: email.to_string(),
+            id: UserId::new(id).unwrap(),
+            hub_id: HubId::new(hub_id).unwrap(),
+            name: UserName::new(name).unwrap(),
+            email: UserEmail::new(email).unwrap(),
             visited_at: Some(fixed_datetime()),
         }
     }
@@ -1022,19 +1033,28 @@ mod tests {
     #[test]
     fn apply_assignment_updates_assigns_and_unassigns() {
         let base_assigned = sample_task(1, 1, Some(1), 2);
-        let assigned =
-            apply_assignment_updates(UpdateTask::from_task(&base_assigned), Some(1), Some(2));
-        assert_eq!(assigned.assigned_to, Some(2));
+        let assigned = apply_assignment_updates(
+            UpdateTask::from_task(&base_assigned),
+            base_assigned.assigned_to,
+            Some(UserId::new(2).unwrap()),
+        );
+        assert_eq!(assigned.assigned_to, Some(UserId::new(2).unwrap()));
 
         let base_with_assignee = sample_task(2, 1, Some(1), 2);
-        let unassigned =
-            apply_assignment_updates(UpdateTask::from_task(&base_with_assignee), Some(1), None);
+        let unassigned = apply_assignment_updates(
+            UpdateTask::from_task(&base_with_assignee),
+            base_with_assignee.assigned_to,
+            None,
+        );
         assert!(unassigned.assigned_to.is_none());
 
         let base_same_assignee = sample_task(3, 1, Some(3), 2);
-        let unchanged =
-            apply_assignment_updates(UpdateTask::from_task(&base_same_assignee), Some(3), Some(3));
-        assert_eq!(unchanged.assigned_to, Some(3));
+        let unchanged = apply_assignment_updates(
+            UpdateTask::from_task(&base_same_assignee),
+            base_same_assignee.assigned_to,
+            base_same_assignee.assigned_to,
+        );
+        assert_eq!(unchanged.assigned_to, base_same_assignee.assigned_to);
     }
 
     #[test]
@@ -1077,10 +1097,10 @@ mod tests {
     fn metadata_event_payload_emits_differences() {
         let current = sample_task(1, 1, None, 2);
         let mut updated = current.clone();
-        updated.title = "Updated".to_string();
-        updated.description = Some("New".to_string());
+        updated.title = crate::domain::types::TaskTitle::new("Updated").unwrap();
+        updated.description = Some(crate::domain::types::TaskDescription::from("New"));
         updated.due_date = Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap());
-        updated.track = Some("Updated Track".to_string());
+        updated.track = Some(crate::domain::types::TaskTrack::new("Updated Track").unwrap());
         updated.priority = TaskPriority::High;
 
         let payload =
@@ -1111,7 +1131,7 @@ mod tests {
         let assignee = sample_user(7, 1, "Assignee", "assignee@example.com");
         let author = sample_user(11, 1, "Author", "author@example.com");
 
-        let task = sample_task(5, 1, Some(assignee.id), author.id);
+        let task = sample_task(5, 1, Some(assignee.id.get()), author.id.get());
         let event = sample_event(13, task.id, Some(author.id));
 
         let mut repo = TaskDetailsRepo::new();
@@ -1122,7 +1142,7 @@ mod tests {
         repo.task_reader
             .expect_get_task_by_id()
             .return_once(move |id, hub| {
-                assert_eq!(id, task_for_return.id);
+                assert_eq!(id, task_for_return.id.get());
                 assert_eq!(hub, hub_id);
                 Ok(Some(task_for_return))
             });
@@ -1131,7 +1151,7 @@ mod tests {
         repo.event_reader
             .expect_list_events_for_task()
             .return_once(move |task_id, hub| {
-                assert_eq!(task_id, event_for_return.task_id);
+                assert_eq!(task_id, event_for_return.task_id.get());
                 assert_eq!(hub, hub_id);
                 Ok(vec![event_for_return])
             });
@@ -1144,7 +1164,7 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, author_for_author_lookup.id);
+                assert_eq!(id, author_for_author_lookup.id.get());
                 assert_eq!(hub, hub_id);
                 Ok(Some(author_for_author_lookup))
             });
@@ -1155,7 +1175,7 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, assignee_for_lookup.id);
+                assert_eq!(id, assignee_for_lookup.id.get());
                 assert_eq!(hub, hub_id);
                 Ok(Some(assignee_for_lookup))
             });
@@ -1166,12 +1186,12 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, author_for_event_lookup.id);
+                assert_eq!(id, author_for_event_lookup.id.get());
                 assert_eq!(hub, hub_id);
                 Ok(Some(author_for_event_lookup))
             });
 
-        let result = load_task_details(&repo, &user, task.id).expect("should load task");
+        let result = load_task_details(&repo, &user, task.id.get()).expect("should load task");
 
         assert_eq!(result.task.id, task.id);
         assert_eq!(result.author.id, author.id);
@@ -1251,8 +1271,8 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id);
-                assert_eq!(hub, task_clone.hub_id);
+                assert_eq!(id, task_clone.id.get());
+                assert_eq!(hub, task_clone.hub_id.get());
                 Ok(Some(task_clone))
             }
         });
@@ -1273,15 +1293,15 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id);
-                assert_eq!(hub, task_clone.hub_id);
+                assert_eq!(id, task_clone.id.get());
+                assert_eq!(hub, task_clone.hub_id.get());
                 Ok(Some(task_clone))
             }
         });
         repo.task_writer.expect_delete_task().return_once({
             move |id, hub| {
-                assert_eq!(id, task.id);
-                assert_eq!(hub, task.hub_id);
+                assert_eq!(id, task.id.get());
+                assert_eq!(hub, task.hub_id.get());
                 Ok(())
             }
         });
@@ -1297,8 +1317,8 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id);
-                assert_eq!(hub, task_clone.hub_id);
+                assert_eq!(id, task_clone.id.get());
+                assert_eq!(hub, task_clone.hub_id.get());
                 Ok(Some(task_clone))
             }
         });
@@ -1324,7 +1344,7 @@ mod tests {
         fn new(task: Task, users: Vec<User>) -> Self {
             let mut map = HashMap::new();
             for user in users {
-                map.insert(user.email.to_lowercase(), user);
+                map.insert(user.email.as_str().to_lowercase(), user);
             }
 
             Self {
@@ -1347,7 +1367,7 @@ mod tests {
     impl TaskReader for UpdateRepo {
         fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
             let task = self.task.borrow();
-            if task.id == id && task.hub_id == hub_id {
+            if task.id.get() == id && task.hub_id.get() == hub_id {
                 Ok(Some(task.clone()))
             } else {
                 Ok(None)
@@ -1383,7 +1403,7 @@ mod tests {
             updates: &DomainUpdateTask,
         ) -> RepositoryResult<Task> {
             let mut task = self.task.borrow_mut();
-            if task.id != task_id || task.hub_id != hub_id {
+            if task.id.get() != task_id || task.hub_id.get() != hub_id {
                 return Err(RepositoryError::NotFound);
             }
 
@@ -1420,7 +1440,7 @@ mod tests {
             hub_id: i32,
         ) -> RepositoryResult<Vec<TaskEvent>> {
             let task = self.task.borrow();
-            if task.id != task_id || task.hub_id != hub_id {
+            if task.id.get() != task_id || task.hub_id.get() != hub_id {
                 return Ok(Vec::new());
             }
 
@@ -1429,7 +1449,7 @@ mod tests {
 
         fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>> {
             let task = self.task.borrow();
-            if task.hub_id != hub_id {
+            if task.hub_id.get() != hub_id {
                 return Ok(None);
             }
 
@@ -1437,7 +1457,7 @@ mod tests {
                 .events
                 .borrow()
                 .iter()
-                .find(|&event| event.id == id)
+                .find(|&event| event.id.get() == id)
                 .cloned())
         }
     }
@@ -1448,7 +1468,7 @@ mod tests {
                 .users
                 .borrow()
                 .values()
-                .find(|user| user.id == id && user.hub_id == hub_id)
+                .find(|user| user.id.get() == id && user.hub_id.get() == hub_id)
                 .cloned())
         }
 
@@ -1458,7 +1478,7 @@ mod tests {
                 .borrow()
                 .get(&email.trim().to_lowercase())
                 .cloned()
-                .filter(|user| user.hub_id == hub_id))
+                .filter(|user| user.hub_id.get() == hub_id))
         }
 
         fn list_users(&self, _: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
@@ -1472,7 +1492,7 @@ mod tests {
             &self,
             new_user: &crate::domain::user::NewUser,
         ) -> RepositoryResult<User> {
-            if let Some(existing) = self.user_by_email(&new_user.email) {
+            if let Some(existing) = self.user_by_email(new_user.email.as_str()) {
                 return Ok(existing);
             }
 
@@ -1484,7 +1504,7 @@ mod tests {
             };
 
             let user = User {
-                id,
+                id: crate::domain::types::UserId::new(id).unwrap(),
                 hub_id: new_user.hub_id,
                 name: new_user.name.clone(),
                 email: new_user.email.clone(),
@@ -1493,7 +1513,7 @@ mod tests {
 
             self.users
                 .borrow_mut()
-                .insert(user.email.to_lowercase(), user.clone());
+                .insert(user.email.as_str().to_lowercase(), user.clone());
 
             Ok(user)
         }
@@ -1524,7 +1544,7 @@ mod tests {
             *next_id += 1;
 
             let record = TaskEvent {
-                id,
+                id: crate::domain::types::TaskEventId::new(id).unwrap(),
                 task_id: event.task_id,
                 user_id: event.user_id,
                 event_type: event.event_type,
@@ -1555,22 +1575,25 @@ mod tests {
             "message": "Updated description",
             "status": "InProgress",
             "due_date": due_date.to_string(),
-            "id": assignee.email,
-            "name": assignee.name,
-            "email": assignee.email,
+            "id": assignee.email.as_str(),
+            "name": assignee.name.as_str(),
+            "email": assignee.email.as_str(),
         }))
         .expect("valid form payload");
 
         let outcome = update_task(&repo, &zmq, &user, 42, form).expect("should update task");
 
-        assert_eq!(outcome.id, 42);
-        assert_eq!(outcome.title, "Updated title");
+        assert_eq!(outcome.id.get(), 42);
+        assert_eq!(outcome.title.as_str(), "Updated title");
 
         let stored = repo.task.borrow().clone();
-        assert_eq!(stored.title, "Updated title");
+        assert_eq!(stored.title.as_str(), "Updated title");
         assert_eq!(stored.status, TaskStatus::InProgress);
         assert_eq!(stored.due_date, Some(due_date));
-        assert_eq!(stored.description.as_deref(), Some("Updated description"));
+        assert_eq!(
+            stored.description.as_ref().map(|value| value.as_str()),
+            Some("Updated description")
+        );
         assert_eq!(stored.assigned_to, Some(assignee.id));
 
         let events = repo.events.borrow();
@@ -1642,10 +1665,13 @@ mod tests {
 
         let outcome = update_task(&repo, &zmq, &user, 50, form).expect("should update task");
 
-        assert_eq!(outcome.title, "Updated title");
+        assert_eq!(outcome.title.as_str(), "Updated title");
 
         let stored = repo.task.borrow().clone();
-        assert_eq!(stored.track.as_deref(), Some("New Track"));
+        assert_eq!(
+            stored.track.as_ref().map(|track| track.as_str()),
+            Some("New Track")
+        );
         assert_eq!(stored.priority, TaskPriority::High);
 
         let events = repo.events.borrow();
@@ -1683,7 +1709,7 @@ mod tests {
         let author = sample_user(3, 1, "Author", "author@example.com");
         let assignee = sample_user(5, 1, "Executor", "executor@example.com");
         let commenter = sample_user(7, 1, "Commenter", "commenter@example.com");
-        let task = sample_task(55, 1, Some(assignee.id), author.id);
+        let task = sample_task(55, 1, Some(assignee.id.get()), author.id.get());
         let repo = UpdateRepo::new(
             task.clone(),
             vec![author.clone(), assignee.clone(), commenter.clone()],
@@ -1699,14 +1725,15 @@ mod tests {
             "message": "Updated description",
             "status": "InProgress",
             "due_date": "2024-05-01",
-            "name": assignee.name,
-            "email": assignee.email,
+            "name": assignee.name.as_str(),
+            "email": assignee.email.as_str(),
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(&repo, &zmq, &user, task.id, form).expect("should update task");
+        let outcome =
+            update_task(&repo, &zmq, &user, task.id.get(), form).expect("should update task");
 
-        assert_eq!(outcome.title, "Updated title");
+        assert_eq!(outcome.title.as_str(), "Updated title");
 
         let payloads = zmq.messages();
         assert_eq!(payloads.len(), 1);
@@ -1809,7 +1836,7 @@ mod tests {
     #[test]
     fn update_task_unassigns_when_selection_missing() {
         let assignee = sample_user(8, 1, "Assigned", "assigned@example.com");
-        let task = sample_task(9, 1, Some(assignee.id), 4);
+        let task = sample_task(9, 1, Some(assignee.id.get()), 4);
         let repo = UpdateRepo::new(task, vec![assignee.clone()]);
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
@@ -1884,12 +1911,12 @@ mod tests {
         let outcome =
             update_task(&repo, &zmq, &user, 11, form).expect("expected update to succeed");
 
-        assert_eq!(outcome.id, 11);
-        assert_eq!(outcome.title, "Updated");
+        assert_eq!(outcome.id.get(), 11);
+        assert_eq!(outcome.title.as_str(), "Updated");
 
         {
             let stored = repo.task.borrow();
-            assert_eq!(stored.title, "Updated");
+            assert_eq!(stored.title.as_str(), "Updated");
             assert!(stored.assigned_to.is_none());
         }
 
@@ -1938,7 +1965,7 @@ mod tests {
     #[test]
     fn add_task_comment_records_event() {
         let commenter = sample_user(21, 1, "Commenter", "user@example.com");
-        let task = sample_task(77, 1, None, commenter.id);
+        let task = sample_task(77, 1, None, commenter.id.get());
         let repo = UpdateRepo::new(task.clone(), vec![commenter.clone()]);
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let zmq = MockZmqSender {};
@@ -1948,7 +1975,7 @@ mod tests {
         };
 
         let recorded =
-            add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
+            add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
         assert_eq!(recorded.task_id, task.id);
         assert_eq!(recorded.event_type, TaskEventType::Comment);
         assert_eq!(recorded.event_data, json!({"text": "Новый комментарий"}));
@@ -1980,17 +2007,21 @@ mod tests {
             message: "Комментарий".to_string(),
         };
 
-        add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
+        add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
 
         let events = repo.events.borrow();
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        assert!(
-            repo.users
-                .borrow()
-                .values()
-                .any(|record| record.id == event.user_id.unwrap_or_default())
-        );
+        if let Some(user_id) = event.user_id {
+            assert!(
+                repo.users
+                    .borrow()
+                    .values()
+                    .any(|record| record.id == user_id)
+            );
+        } else {
+            panic!("comment event should include a user id");
+        }
     }
 
     #[test]
@@ -1998,7 +2029,7 @@ mod tests {
         let author = sample_user(31, 1, "Author", "author@example.com");
         let assignee = sample_user(32, 1, "Assignee", "assignee@example.com");
         let participant = sample_user(33, 1, "Participant", "participant@example.com");
-        let task = sample_task(107, 1, Some(assignee.id), author.id);
+        let task = sample_task(107, 1, Some(assignee.id.get()), author.id.get());
         let repo = UpdateRepo::new(
             task.clone(),
             vec![author.clone(), assignee.clone(), participant.clone()],
@@ -2021,7 +2052,7 @@ mod tests {
             message: "Комментарий".to_string(),
         };
 
-        add_task_comment(&repo, &zmq, &user, task.id, form).expect("should add comment");
+        add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
 
         let payloads = zmq.messages();
         assert_eq!(payloads.len(), 1);

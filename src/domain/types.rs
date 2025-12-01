@@ -69,6 +69,8 @@ macro_rules! id_newtype {
 
 id_newtype!(UserId);
 id_newtype!(HubId);
+id_newtype!(TaskId);
+id_newtype!(TaskEventId);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 /// Lower-cased and validated email address.
@@ -223,6 +225,189 @@ impl TryFrom<&str> for UserName {
 
 impl From<UserName> for String {
     fn from(value: UserName) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Task title wrapper enforcing non-empty values.
+pub struct TaskTitle(String);
+
+impl TaskTitle {
+    pub fn new<S: Into<String>>(value: S) -> Result<Self, TypeConstraintError> {
+        let title = NonEmptyString::new(value)?;
+        Ok(Self(title.into_inner()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Display for TaskTitle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for TaskTitle {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for TaskTitle {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<TaskTitle> for String {
+    fn from(value: TaskTitle) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Task description wrapper for optional HTML content.
+pub struct TaskDescription(String);
+
+impl TaskDescription {
+    pub fn new<S: Into<String>>(value: S) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Display for TaskDescription {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for TaskDescription {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for TaskDescription {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<TaskDescription> for String {
+    fn from(value: TaskDescription) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+/// Task track categorization wrapper.
+pub struct TaskTrack(String);
+
+impl TaskTrack {
+    pub fn new<S: Into<String>>(value: S) -> Result<Self, TypeConstraintError> {
+        let track = NonEmptyString::new(value)?;
+        Ok(Self(track.into_inner()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Display for TaskTrack {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for TaskTrack {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for TaskTrack {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<TaskTrack> for String {
+    fn from(value: TaskTrack) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Search term wrapper for task filtering.
+pub struct SearchTerm(String);
+
+impl SearchTerm {
+    pub fn new<S: Into<String>>(value: S) -> Result<Self, TypeConstraintError> {
+        let term = NonEmptyString::new(value)?;
+        Ok(Self(term.into_inner()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Display for SearchTerm {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for SearchTerm {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for SearchTerm {
+    type Error = TypeConstraintError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<SearchTerm> for String {
+    fn from(value: SearchTerm) -> Self {
         value.0
     }
 }

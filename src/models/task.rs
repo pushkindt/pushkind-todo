@@ -2,9 +2,12 @@ use chrono::{NaiveDate, NaiveDateTime};
 use diesel::prelude::*;
 use thiserror::Error;
 
-use crate::domain::task::{
-    NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
-    TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
+use crate::domain::{
+    task::{
+        NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
+        TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
+    },
+    types::{HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId},
 };
 
 use super::user::User;
@@ -87,10 +90,14 @@ pub enum TaskModelError {
     UnknownStatus { status: String },
     #[error("Unknown task priority '{priority}'")]
     UnknownPriority { priority: String },
+    #[error("Invalid type constraint: {0}")]
+    TypeConstraint(#[from] crate::domain::types::TypeConstraintError),
 }
 
-impl From<Task> for DomainTask {
-    fn from(value: Task) -> Self {
+impl TryFrom<Task> for DomainTask {
+    type Error = crate::domain::types::TypeConstraintError;
+
+    fn try_from(value: Task) -> Result<Self, Self::Error> {
         let Task {
             id,
             hub_id,
@@ -129,21 +136,21 @@ impl From<Task> for DomainTask {
             }
         };
 
-        Self {
-            id,
-            hub_id,
-            title,
-            description,
-            track,
+        Ok(Self {
+            id: TaskId::new(id)?,
+            hub_id: HubId::new(hub_id)?,
+            title: TaskTitle::new(title)?,
+            description: description.map(TaskDescription::from),
+            track: track.map(TaskTrack::new).transpose()?,
             priority,
             status,
             due_date,
-            assigned_to,
-            author_id,
+            assigned_to: assigned_to.map(UserId::new).transpose()?,
+            author_id: UserId::new(author_id)?,
             created_at,
             updated_at,
             completed_at,
-        }
+        })
     }
 }
 
@@ -180,16 +187,16 @@ impl Task {
         }
 
         Ok(DomainTask {
-            id,
-            hub_id,
-            title,
-            description,
-            track,
+            id: TaskId::new(id)?,
+            hub_id: HubId::new(hub_id)?,
+            title: TaskTitle::new(title)?,
+            description: description.map(TaskDescription::from),
+            track: track.map(TaskTrack::new).transpose()?,
             priority,
             status,
             due_date,
-            assigned_to,
-            author_id,
+            assigned_to: assigned_to.map(UserId::new).transpose()?,
+            author_id: UserId::new(author_id)?,
             created_at,
             updated_at,
             completed_at,
@@ -200,15 +207,15 @@ impl Task {
 impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
     fn from(value: &'a DomainNewTask) -> Self {
         Self {
-            hub_id: value.hub_id,
+            hub_id: value.hub_id.get(),
             title: value.title.as_str(),
-            description: value.description.as_deref(),
-            track: value.track.as_deref(),
+            description: value.description.as_ref().map(|d| d.as_str()),
+            track: value.track.as_ref().map(|t| t.as_str()),
             priority: <&'static str>::from(value.priority),
             status: <&'static str>::from(value.status),
             due_date: value.due_date,
-            assigned_to: value.assigned_to,
-            author_id: value.author_id,
+            assigned_to: value.assigned_to.map(|id| id.get()),
+            author_id: value.author_id.get(),
             created_at: value.created_at,
             updated_at: value.updated_at,
             completed_at: None,
@@ -220,35 +227,37 @@ impl<'a> From<&'a DomainUpdateTask> for UpdateTask<'a> {
     fn from(value: &'a DomainUpdateTask) -> Self {
         Self {
             title: value.title.as_str(),
-            description: value.description.as_deref(),
-            track: value.track.as_deref(),
+            description: value.description.as_ref().map(|d| d.as_str()),
+            track: value.track.as_ref().map(|t| t.as_str()),
             priority: <&'static str>::from(value.priority),
             status: <&'static str>::from(value.status),
             due_date: value.due_date,
-            assigned_to: value.assigned_to,
+            assigned_to: value.assigned_to.map(|id| id.get()),
             completed_at: value.completed_at,
             updated_at: value.updated_at,
         }
     }
 }
 
-impl From<TaskAssignment> for DomainTaskAssignment {
-    fn from(value: TaskAssignment) -> Self {
-        Self {
-            task_id: value.task_id,
-            hub_id: value.hub_id,
-            assignee_id: value.assignee_id,
+impl TryFrom<TaskAssignment> for DomainTaskAssignment {
+    type Error = crate::domain::types::TypeConstraintError;
+
+    fn try_from(value: TaskAssignment) -> Result<Self, Self::Error> {
+        Ok(Self {
+            task_id: TaskId::new(value.task_id)?,
+            hub_id: HubId::new(value.hub_id)?,
+            assignee_id: UserId::new(value.assignee_id)?,
             assigned_at: value.assigned_at,
-        }
+        })
     }
 }
 
 impl From<&DomainTaskAssignment> for NewTaskAssignment {
     fn from(value: &DomainTaskAssignment) -> Self {
         Self {
-            task_id: value.task_id,
-            hub_id: value.hub_id,
-            assignee_id: value.assignee_id,
+            task_id: value.task_id.get(),
+            hub_id: value.hub_id.get(),
+            assignee_id: value.assignee_id.get(),
             assigned_at: value.assigned_at,
         }
     }

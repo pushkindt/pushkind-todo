@@ -41,7 +41,7 @@ pub(super) fn task_recipient(
 ) -> NewEmailRecipient {
     let mut fields = HashMap::new();
     fields.insert("task_id".to_string(), task.id.to_string());
-    fields.insert("task_title".to_string(), task.title.clone());
+    fields.insert("task_title".to_string(), task.title.to_string());
     fields.insert("task_status".to_string(), format!("{:?}", task.status));
     fields.insert(
         "notification_kind".to_string(),
@@ -50,8 +50,8 @@ pub(super) fn task_recipient(
     fields.insert("recipient_role".to_string(), recipient_role.to_string());
 
     NewEmailRecipient {
-        address: user.email.clone(),
-        name: user.name.clone(),
+        address: user.email.to_string(),
+        name: user.name.to_string(),
         fields,
     }
 }
