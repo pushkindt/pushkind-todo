@@ -1,3 +1,4 @@
+//! Integration test verifying DB file cleanup behavior.
 mod common;
 
 #[test]

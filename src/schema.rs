@@ -1,3 +1,4 @@
+//! Diesel schema definitions for the todo database tables.
 // @generated automatically by Diesel CLI.
 
 diesel::table! {

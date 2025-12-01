@@ -1,3 +1,4 @@
+//! Diesel repository implementation for task event creation and retrieval.
 use diesel::prelude::*;
 use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
@@ -9,15 +10,18 @@ use crate::{
     repository::{DieselRepository, TaskEventReader, TaskEventWriter},
 };
 
+/// Map model-level validation failures into repository validation errors.
 fn model_error_as_validation(err: TaskEventModelError) -> RepositoryError {
     RepositoryError::ValidationError(err.to_string())
 }
 
+/// Treat unexpected model errors as repository unexpected failures.
 fn model_error_as_unexpected(err: TaskEventModelError) -> RepositoryError {
     RepositoryError::Unexpected(err.to_string())
 }
 
 impl TaskEventReader for DieselRepository {
+    /// Load the streams of events linked to a task, ordered by recency.
     fn list_events_for_task(
         &self,
         task_id: i32,
@@ -42,6 +46,7 @@ impl TaskEventReader for DieselRepository {
             .map_err(model_error_as_unexpected)
     }
 
+    /// Fetch a single task event by identifier scoped to a hub.
     fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTaskEvent>> {
         use crate::schema::{task_events, tasks};
 
@@ -64,6 +69,7 @@ impl TaskEventReader for DieselRepository {
 }
 
 impl TaskEventWriter for DieselRepository {
+    /// Persist a new task event and update the parent task timestamp.
     fn record_event(&self, event: &DomainNewTaskEvent) -> RepositoryResult<DomainTaskEvent> {
         use crate::schema::{task_events, tasks};
 
@@ -93,6 +99,7 @@ impl TaskEventWriter for DieselRepository {
         })
     }
 
+    /// Remove a recorded task event by id, enforcing hub scope.
     fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()> {
         use crate::schema::{task_events, tasks};
 

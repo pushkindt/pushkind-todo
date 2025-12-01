@@ -1,3 +1,4 @@
+//! Domain user structures representing persisted users and creation/update payloads.
 use pushkind_common::domain::auth::AuthenticatedUser;
 use serde::{Deserialize, Serialize};
 

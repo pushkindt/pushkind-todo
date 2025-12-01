@@ -1,3 +1,4 @@
+//! Notification helpers that build and enqueue emails via ZeroMQ.
 use std::collections::HashMap;
 
 use log::error;
@@ -10,6 +11,7 @@ use crate::domain::{task::Task, user::User};
 use crate::services::{ServiceError, ServiceResult};
 
 /// Serialize the email payload and enqueue it for delivery via ZeroMQ.
+/// Serialize the email payload and send it through ZeroMQ.
 pub(super) fn queue_email<Z>(
     zmq_sender: &Z,
     actor: &AuthenticatedUser,
@@ -33,6 +35,7 @@ where
         .map_err(ServiceError::from)
 }
 
+/// Build an email recipient entry for task-related notifications.
 pub(super) fn task_recipient(
     task: &Task,
     user: &User,
@@ -56,6 +59,7 @@ pub(super) fn task_recipient(
     }
 }
 
+/// Clean and normalize text before embedding in outgoing notifications.
 pub(super) fn sanitize_text(value: &str) -> String {
     ammonia::clean(value).trim().to_string()
 }
@@ -65,12 +69,14 @@ mod tests {
     use super::sanitize_text;
 
     #[test]
+    /// Confirms sanitizer keeps allowed HTML tags intact.
     fn retains_allowed_markup_in_sanitized_output() {
         let result = sanitize_text("<strong>Hello</strong> world");
         assert_eq!(result, "<strong>Hello</strong> world");
     }
 
     #[test]
+    /// Ensures sanitizer omits disallowed tags entirely.
     fn does_not_restore_removed_html_fragments() {
         let result = sanitize_text("<script>alert(1)</script>");
         assert!(result.is_empty());

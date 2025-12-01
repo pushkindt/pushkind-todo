@@ -1,3 +1,4 @@
+//! Diesel task models and conversions that map the database schema to domain types.
 use chrono::{NaiveDate, NaiveDateTime};
 use diesel::prelude::*;
 use thiserror::Error;

@@ -1,3 +1,4 @@
+//! UI routes handling the main index, task creation, and file upload workflows.
 use std::sync::Arc;
 
 use actix_multipart::form::MultipartForm;
@@ -14,6 +15,7 @@ use crate::forms::main::{AddTaskForm, UploadTasksForm};
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, main as main_service};
 
+/// Display the main index page showing tasks, filters, and flash messages.
 #[get("/")]
 pub async fn show_index(
     params: web::Query<IndexQuery>,
@@ -50,6 +52,7 @@ pub async fn show_index(
     }
 }
 
+/// Handle task creation submissions and provide flash feedback.
 #[post("/task/add")]
 pub async fn add_task(
     user: AuthenticatedUser,
@@ -79,6 +82,7 @@ pub async fn add_task(
     }
 }
 
+/// Accept a CSV upload of tasks, process it, and flash results.
 #[post("/tasks/upload")]
 pub async fn tasks_upload(
     user: AuthenticatedUser,

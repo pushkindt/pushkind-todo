@@ -1,3 +1,4 @@
+//! JSON API routes used for external task queries.
 use actix_web::{HttpResponse, Responder, get, web};
 use pushkind_common::domain::auth::AuthenticatedUser;
 
@@ -5,10 +6,11 @@ use crate::dto::main::IndexQuery;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, main as main_service};
 
-#[get("/v1/tasks")]
 /// Return a JSON list of tasks with optional search and pagination.
 ///
-/// Users without the role stored in `crate::SERVICE_ACCESS_ROLE` receive a `401 Unauthorized` response.
+/// Respects the configured `SERVICE_ACCESS_ROLE` before delegating to `main_service`.
+/// Users without that role receive a `401 Unauthorized` response.
+#[get("/v1/tasks")]
 pub async fn api_v1_tasks(
     params: web::Query<IndexQuery>,
     user: AuthenticatedUser,

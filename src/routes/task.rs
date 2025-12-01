@@ -1,3 +1,4 @@
+//! Routes focused on task-specific views, updates, and modal interactions.
 use std::sync::Arc;
 
 use actix_web::{HttpResponse, Responder, get, post, web};
@@ -12,6 +13,7 @@ use crate::forms::task::{NewTaskCommentForm, QuickTaskStatusForm, UpdateTaskForm
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
+/// Display a task’s detail page with events, assignee, and author info.
 #[get("/task/{task_id}")]
 pub async fn show_task(
     task_id: web::Path<i32>,
@@ -49,6 +51,7 @@ pub async fn show_task(
     }
 }
 
+/// Render the modal payload used for editing a task via AJAX.
 #[post("/task/modal/{task_id}")]
 pub async fn task_modal(
     task_id: web::Path<i32>,
@@ -79,6 +82,7 @@ pub async fn task_modal(
     }
 }
 
+/// Apply edits submitted from the task modal and redirect back.
 #[post("/task/{task_id}/update")]
 pub async fn update_task(
     task_id: web::Path<i32>,
@@ -114,6 +118,7 @@ pub async fn update_task(
     }
 }
 
+/// Quickly transition task status from the task list controls.
 #[post("/task/{task_id}/status")]
 pub async fn quick_update_task_status(
     task_id: web::Path<i32>,
@@ -158,6 +163,7 @@ pub async fn quick_update_task_status(
     }
 }
 
+/// Record a new comment for a task and refresh the task view.
 #[post("/task/{task_id}/comments")]
 pub async fn add_task_comment(
     task_id: web::Path<i32>,
@@ -194,6 +200,7 @@ pub async fn add_task_comment(
     }
 }
 
+/// Delete the specified task, sending flash feedback on success/failure.
 #[post("/task/{task_id}/delete")]
 pub async fn delete_task(
     task_id: web::Path<i32>,

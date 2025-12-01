@@ -1,3 +1,4 @@
+//! DTO structs for task details, events, and modal payloads returned to handlers.
 use crate::domain::{task::Task, task_event::TaskEvent, user::User};
 use serde::Serialize;
 

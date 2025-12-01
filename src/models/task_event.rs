@@ -1,3 +1,4 @@
+//! Diesel task event models and error mapping used by the repository layer.
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use thiserror::Error;

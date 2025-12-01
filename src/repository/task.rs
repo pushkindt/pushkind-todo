@@ -1,3 +1,4 @@
+//! Diesel repository implementation for task persistence and queries.
 use diesel::prelude::*;
 use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
@@ -14,6 +15,7 @@ use crate::{
 };
 
 impl TaskReader for DieselRepository {
+    /// Retrieve the distinct task tracks for a hub.
     fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
         use crate::schema::tasks;
 
@@ -28,6 +30,7 @@ impl TaskReader for DieselRepository {
         Ok(tracks.into_iter().flatten().collect())
     }
 
+    /// Load a single task within the hub by its identifier.
     fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTask>> {
         use crate::schema::tasks;
 
@@ -43,6 +46,7 @@ impl TaskReader for DieselRepository {
         Ok(task.map(|t| t.try_into()).transpose()?)
     }
 
+    /// Query for tasks matching the provided filters and pagination.
     fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<DomainTask>)> {
         use crate::schema::tasks;
 
@@ -151,6 +155,7 @@ impl TaskReader for DieselRepository {
         ))
     }
 
+    /// Read the history of assignments recorded for a task.
     fn list_assignments_for_task(
         &self,
         task_id: i32,
@@ -175,6 +180,7 @@ impl TaskReader for DieselRepository {
 }
 
 impl TaskWriter for DieselRepository {
+    /// Insert a new task record and return its domain representation.
     fn create_task(&self, new_task: &DomainNewTask) -> RepositoryResult<DomainTask> {
         use crate::schema::{tasks, users};
 
@@ -214,6 +220,7 @@ impl TaskWriter for DieselRepository {
         Ok(created.try_into()?)
     }
 
+    /// Persist updates to an existing task record.
     fn update_task(
         &self,
         task_id: i32,
@@ -251,6 +258,7 @@ impl TaskWriter for DieselRepository {
         Ok(updated.try_into()?)
     }
 
+    /// Remove a task belonging to the specified hub.
     fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
         use crate::schema::tasks;
 
@@ -268,6 +276,7 @@ impl TaskWriter for DieselRepository {
         Ok(())
     }
 
+    /// Record a new assignment entry for auditing.
     fn record_assignment(&self, assignment: &DomainTaskAssignment) -> RepositoryResult<()> {
         use crate::schema::task_assignments;
 
@@ -281,6 +290,7 @@ impl TaskWriter for DieselRepository {
         Ok(())
     }
 
+    /// Remove an existing assignment snapshot for a task.
     fn remove_assignment(
         &self,
         task_id: i32,

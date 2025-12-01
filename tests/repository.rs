@@ -1,3 +1,4 @@
+//! Integration tests ensuring repository implementations behave as expected.
 use chrono::{Duration, NaiveDate};
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_todo::domain::task::{

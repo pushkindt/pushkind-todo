@@ -1,3 +1,4 @@
+//! DTO definitions for the index page queries and view payloads.
 use crate::domain::task::Task;
 use crate::domain::user::User;
 use pushkind_common::pagination::Paginated;
