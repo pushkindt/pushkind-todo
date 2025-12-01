@@ -37,8 +37,9 @@ impl TaskEventReader for DieselRepository {
 
         db_events
             .into_iter()
-            .map(|event| event.try_into().map_err(model_error_as_unexpected))
-            .collect()
+            .map(|event| event.try_into())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(model_error_as_unexpected)
     }
 
     fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTaskEvent>> {

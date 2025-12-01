@@ -8,7 +8,10 @@ use thiserror::Error;
 use validator::Validate;
 
 use crate::{
-    domain::task::{NewTask, TaskPriority},
+    domain::{
+        task::{NewTask, TaskPriority},
+        types::{HubId, TaskDescription, TaskTitle, TaskTrack, TypeConstraintError, UserId},
+    },
     forms::task::AssigneeSelectionForm,
 };
 
@@ -20,30 +23,29 @@ pub(crate) fn build_new_task_payload(
     description: Option<String>,
     track: Option<String>,
     priority: Option<TaskPriority>,
-) -> NewTask {
-    let mut new_task = NewTask::new(hub_id, author_id, title);
+) -> Result<NewTask, TypeConstraintError> {
+    let title = TaskTitle::new(title)?;
+    let mut new_task = NewTask::new(HubId::new(hub_id)?, UserId::new(author_id)?, title);
 
     if let Some(description) = description {
         let sanitized = ammonia::clean(&description);
 
         if !sanitized.trim().is_empty() {
-            new_task = new_task.description(sanitized);
+            new_task = new_task.description(TaskDescription::from(sanitized));
         }
     }
 
-    if let Some(track) = track {
-        let sanitized = track.trim();
-
-        if !sanitized.is_empty() {
-            new_task = new_task.track(sanitized);
-        }
+    if let Some(track) = track
+        && let Ok(track) = TaskTrack::new(track.trim())
+    {
+        new_task = new_task.track(track);
     }
 
     if let Some(priority) = priority {
         new_task = new_task.priority(priority);
     }
 
-    new_task
+    Ok(new_task)
 }
 
 #[derive(Deserialize, Validate)]
@@ -64,18 +66,19 @@ pub struct AddTaskForm {
 
 impl AddTaskForm {
     /// Convert the validated form into a [`NewTask`] payload.
-    pub fn into_new_task(self, hub_id: i32, author_id: i32) -> Option<NewTask> {
-        let title = self.title?;
+    pub fn into_new_task(
+        self,
+        hub_id: i32,
+        author_id: i32,
+    ) -> Result<Option<NewTask>, TypeConstraintError> {
+        let title = match self.title {
+            Some(title) => title,
+            None => return Ok(None),
+        };
         let priority = Self::parse_priority(self.priority);
 
-        Some(build_new_task_payload(
-            hub_id,
-            author_id,
-            title,
-            self.message,
-            self.track,
-            priority,
-        ))
+        build_new_task_payload(hub_id, author_id, title, self.message, self.track, priority)
+            .map(Some)
     }
 
     pub(crate) fn parse_priority(priority: Option<String>) -> Option<TaskPriority> {
@@ -109,6 +112,8 @@ pub enum UploadTasksFormError {
     FileReadError,
     #[error("Error parsing csv file")]
     CsvParseError,
+    #[error("Invalid task data: {0}")]
+    InvalidTaskData(String),
 }
 
 impl From<std::io::Error> for UploadTasksFormError {
@@ -120,6 +125,12 @@ impl From<std::io::Error> for UploadTasksFormError {
 impl From<csv::Error> for UploadTasksFormError {
     fn from(_: csv::Error) -> Self {
         UploadTasksFormError::CsvParseError
+    }
+}
+
+impl From<TypeConstraintError> for UploadTasksFormError {
+    fn from(err: TypeConstraintError) -> Self {
+        UploadTasksFormError::InvalidTaskData(err.to_string())
     }
 }
 
@@ -159,7 +170,7 @@ fn parse_tasks<R: Read>(
 
         if let Some(title) = record.title {
             let task =
-                build_new_task_payload(hub_id, author_id, title, record.description, None, None);
+                build_new_task_payload(hub_id, author_id, title, record.description, None, None)?;
 
             tasks.push(task);
         }
@@ -178,13 +189,20 @@ mod tests {
         let csv = "title,description\nhello,first\nworld,second\n";
         let author_id = 5;
         let tasks = parse_tasks(Cursor::new(csv), 42, author_id).expect("should parse");
-        assert!(tasks.iter().all(|task| task.author_id == author_id));
+        assert!(
+            tasks
+                .iter()
+                .all(|task| task.author_id == UserId::new(author_id).unwrap())
+        );
 
         assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].hub_id, 42);
-        assert_eq!(tasks[0].title, "hello");
-        assert_eq!(tasks[0].description.as_deref(), Some("first"));
-        assert_eq!(tasks[1].title, "world");
+        assert_eq!(tasks[0].hub_id, HubId::new(42).unwrap());
+        assert_eq!(tasks[0].title.as_str(), "hello");
+        assert_eq!(
+            tasks[0].description.as_ref().map(|d| d.as_str()),
+            Some("first")
+        );
+        assert_eq!(tasks[1].title.as_str(), "world");
     }
 
     #[test]
@@ -193,8 +211,8 @@ mod tests {
         let tasks = parse_tasks(Cursor::new(csv), 7, 9).expect("should parse");
 
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].hub_id, 7);
-        assert_eq!(tasks[0].title, "foo");
+        assert_eq!(tasks[0].hub_id, HubId::new(7).unwrap());
+        assert_eq!(tasks[0].title.as_str(), "foo");
     }
 
     #[test]
@@ -217,7 +235,8 @@ mod tests {
             Some("   ".to_string()),
             None,
             None,
-        );
+        )
+        .expect("payload should build");
 
         assert!(task.description.is_none());
     }
@@ -231,9 +250,10 @@ mod tests {
             None,
             Some("Alpha Track".to_string()),
             Some(TaskPriority::High),
-        );
+        )
+        .expect("payload should build");
 
-        assert_eq!(task.track.as_deref(), Some("Alpha Track"));
+        assert_eq!(task.track.as_ref().map(|t| t.as_str()), Some("Alpha Track"));
         assert_eq!(task.priority, TaskPriority::High);
     }
 

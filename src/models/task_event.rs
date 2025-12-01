@@ -2,8 +2,9 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use thiserror::Error;
 
-use crate::domain::task_event::{
-    NewTaskEvent as DomainNewTaskEvent, TaskEvent as DomainTaskEvent, TaskEventType,
+use crate::domain::{
+    task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEvent as DomainTaskEvent, TaskEventType},
+    types::{TaskEventId, TaskId, UserId},
 };
 
 use super::{task::Task, user::User};
@@ -39,6 +40,8 @@ pub enum TaskEventModelError {
     InvalidEventData { source: serde_json::Error },
     #[error("Failed to serialize event payload: {source}")]
     SerializationFailed { source: serde_json::Error },
+    #[error("Invalid type constraint: {0}")]
+    TypeConstraint(#[from] crate::domain::types::TypeConstraintError),
 }
 
 impl TaskEvent {
@@ -64,9 +67,9 @@ impl TaskEvent {
             .map_err(|source| TaskEventModelError::InvalidEventData { source })?;
 
         Ok(DomainTaskEvent {
-            id,
-            task_id,
-            user_id,
+            id: TaskEventId::new(id)?,
+            task_id: TaskId::new(task_id)?,
+            user_id: user_id.map(UserId::new).transpose()?,
             event_type,
             event_data,
             created_at,
@@ -92,8 +95,8 @@ impl TryFrom<&DomainNewTaskEvent> for NewTaskEvent {
         let event_type: &'static str = value.event_type.into();
 
         Ok(Self {
-            task_id: value.task_id,
-            user_id: value.user_id,
+            task_id: value.task_id.get(),
+            user_id: value.user_id.map(|id| id.get()),
             event_type: event_type.to_string(),
             event_data,
             created_at: value.created_at,

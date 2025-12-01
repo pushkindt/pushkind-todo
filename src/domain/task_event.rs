@@ -2,6 +2,8 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::types::{TaskEventId, TaskId, UserId};
+
 /// Type of event that can occur on a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskEventType {
@@ -19,11 +21,11 @@ pub enum TaskEventType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskEvent {
     /// Unique identifier of the task event.
-    pub id: i32,
+    pub id: TaskEventId,
     /// Identifier of the task the event belongs to.
-    pub task_id: i32,
+    pub task_id: TaskId,
     /// Identifier of the user who triggered the event, if available.
-    pub user_id: Option<i32>,
+    pub user_id: Option<UserId>,
     /// Specific type of event.
     pub event_type: TaskEventType,
     /// Additional data describing the event.
@@ -35,9 +37,9 @@ pub struct TaskEvent {
 impl TaskEvent {
     /// Create a new event with the provided payload and current timestamp.
     pub fn new(
-        id: i32,
-        task_id: i32,
-        user_id: Option<i32>,
+        id: TaskEventId,
+        task_id: TaskId,
+        user_id: Option<UserId>,
         event_type: TaskEventType,
         event_data: Value,
     ) -> Self {
@@ -56,9 +58,9 @@ impl TaskEvent {
 #[derive(Debug, Clone)]
 pub struct NewTaskEvent {
     /// Identifier of the task the event belongs to.
-    pub task_id: i32,
+    pub task_id: TaskId,
     /// Identifier of the user who triggered the event, if available.
-    pub user_id: Option<i32>,
+    pub user_id: Option<UserId>,
     /// Specific type of event.
     pub event_type: TaskEventType,
     /// Additional data describing the event.
@@ -70,8 +72,8 @@ pub struct NewTaskEvent {
 impl NewTaskEvent {
     /// Create a new event payload using the current timestamp.
     pub fn new(
-        task_id: i32,
-        user_id: Option<i32>,
+        task_id: TaskId,
+        user_id: Option<UserId>,
         event_type: TaskEventType,
         event_data: Value,
     ) -> Self {

@@ -1,6 +1,8 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
+use super::types::{HubId, SearchTerm, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId};
+
 /// Status assigned to a task as it moves through its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TaskStatus {
@@ -60,15 +62,15 @@ impl From<&str> for TaskPriority {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     /// Unique identifier of the task.
-    pub id: i32,
+    pub id: TaskId,
     /// Hub the task belongs to.
-    pub hub_id: i32,
+    pub hub_id: HubId,
     /// Short summary describing the task.
-    pub title: String,
+    pub title: TaskTitle,
     /// Optional detailed description for additional context.
-    pub description: Option<String>,
+    pub description: Option<TaskDescription>,
     /// Optional track categorization that the task belongs to.
-    pub track: Option<String>,
+    pub track: Option<TaskTrack>,
     /// Priority level assigned to the task.
     pub priority: TaskPriority,
     /// Current status for the task.
@@ -76,9 +78,9 @@ pub struct Task {
     /// Optional due date for completing the task.
     pub due_date: Option<NaiveDate>,
     /// Identifier of the user assigned to the task, if any.
-    pub assigned_to: Option<i32>,
+    pub assigned_to: Option<UserId>,
     /// Identifier of the user who created the task.
-    pub author_id: i32,
+    pub author_id: UserId,
     /// Timestamp for when the task was created.
     pub created_at: NaiveDateTime,
     /// Timestamp for the most recent update.
@@ -98,13 +100,13 @@ impl Task {
 #[derive(Debug, Clone)]
 pub struct NewTask {
     /// Hub that should own the new task.
-    pub hub_id: i32,
+    pub hub_id: HubId,
     /// Title for the task.
-    pub title: String,
+    pub title: TaskTitle,
     /// Optional description providing more context.
-    pub description: Option<String>,
+    pub description: Option<TaskDescription>,
     /// Optional track categorization that the task belongs to.
-    pub track: Option<String>,
+    pub track: Option<TaskTrack>,
     /// Priority level for the task.
     pub priority: TaskPriority,
     /// Desired status for the task upon creation.
@@ -112,9 +114,9 @@ pub struct NewTask {
     /// Optional due date.
     pub due_date: Option<NaiveDate>,
     /// Optional identifier for the assignee.
-    pub assigned_to: Option<i32>,
+    pub assigned_to: Option<UserId>,
     /// Identifier of the user who created the task.
-    pub author_id: i32,
+    pub author_id: UserId,
     /// Creation timestamp captured at the moment of building the payload.
     pub created_at: NaiveDateTime,
     /// Update timestamp captured at the moment of building the payload.
@@ -123,11 +125,11 @@ pub struct NewTask {
 
 impl NewTask {
     /// Create a new task payload for the provided hub with the supplied title.
-    pub fn new(hub_id: i32, author_id: i32, title: impl Into<String>) -> Self {
+    pub fn new(hub_id: HubId, author_id: UserId, title: TaskTitle) -> Self {
         let now = chrono::Local::now().naive_utc();
         Self {
             hub_id,
-            title: title.into(),
+            title,
             description: None,
             track: None,
             priority: TaskPriority::default(),
@@ -141,14 +143,14 @@ impl NewTask {
     }
 
     /// Set a description for the task.
-    pub fn description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
+    pub fn description(mut self, description: TaskDescription) -> Self {
+        self.description = Some(description);
         self
     }
 
     /// Set a track for the task.
-    pub fn track(mut self, track: impl Into<String>) -> Self {
-        self.track = Some(track.into());
+    pub fn track(mut self, track: TaskTrack) -> Self {
+        self.track = Some(track);
         self
     }
 
@@ -177,7 +179,7 @@ impl NewTask {
     }
 
     /// Assign the task to a specific user during creation.
-    pub fn assign_to(mut self, assignee_id: i32) -> Self {
+    pub fn assign_to(mut self, assignee_id: UserId) -> Self {
         self.assigned_to = Some(assignee_id);
         self
     }
@@ -187,18 +189,18 @@ impl NewTask {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskAssignment {
     /// Identifier of the task being assigned.
-    pub task_id: i32,
+    pub task_id: TaskId,
     /// Hub that owns the task.
-    pub hub_id: i32,
+    pub hub_id: HubId,
     /// Identifier of the assignee.
-    pub assignee_id: i32,
+    pub assignee_id: UserId,
     /// Timestamp when the assignment occurred.
     pub assigned_at: NaiveDateTime,
 }
 
 impl TaskAssignment {
     /// Create a new assignment payload using the current timestamp.
-    pub fn new(task_id: i32, hub_id: i32, assignee_id: i32) -> Self {
+    pub fn new(task_id: TaskId, hub_id: HubId, assignee_id: UserId) -> Self {
         Self {
             task_id,
             hub_id,
@@ -237,17 +239,17 @@ impl From<&str> for TaskStatus {
 #[derive(Debug, Clone)]
 pub struct TaskListFilters {
     /// Hub that scopes the query.
-    pub hub_id: i32,
+    pub hub_id: HubId,
     /// Optional filter to only return tasks assigned to a user.
-    pub assignee_id: Option<i32>,
+    pub assignee_id: Option<UserId>,
     /// Optional filter restricting tasks to a specific track.
-    pub track: Option<String>,
+    pub track: Option<TaskTrack>,
     /// Optional filter to limit results to a specific status.
     pub status: Option<TaskStatus>,
     /// Optional filter to restrict results to a priority level.
     pub priority: Option<TaskPriority>,
     /// Optional search term matching task titles or descriptions.
-    pub search: Option<String>,
+    pub search: Option<SearchTerm>,
     /// Only return tasks due on or before this date.
     pub due_before: Option<NaiveDate>,
     /// Only return tasks due on or after this date.
@@ -260,7 +262,7 @@ pub struct TaskListFilters {
 
 impl TaskListFilters {
     /// Build a new filter set scoped to the provided hub.
-    pub fn new(hub_id: i32) -> Self {
+    pub fn new(hub_id: HubId) -> Self {
         Self {
             hub_id,
             assignee_id: None,
@@ -276,19 +278,14 @@ impl TaskListFilters {
     }
 
     /// Restrict the results to a specific assignee.
-    pub fn for_assignee(mut self, assignee_id: i32) -> Self {
+    pub fn for_assignee(mut self, assignee_id: UserId) -> Self {
         self.assignee_id = Some(assignee_id);
         self
     }
 
     /// Restrict the results to a specific track name.
-    pub fn with_track(mut self, track: impl Into<String>) -> Self {
-        let track = track.into();
-        if track.trim().is_empty() {
-            self.track = None;
-        } else {
-            self.track = Some(track);
-        }
+    pub fn with_track(mut self, track: TaskTrack) -> Self {
+        self.track = Some(track);
         self
     }
 
@@ -305,8 +302,8 @@ impl TaskListFilters {
     }
 
     /// Apply a free-text search filter.
-    pub fn search(mut self, term: impl Into<String>) -> Self {
-        self.search = Some(term.into());
+    pub fn search(mut self, term: SearchTerm) -> Self {
+        self.search = Some(term);
         self
     }
 
@@ -339,11 +336,11 @@ impl TaskListFilters {
 #[derive(Debug, Clone)]
 pub struct UpdateTask {
     /// New title value for the task.
-    pub title: String,
+    pub title: TaskTitle,
     /// New description content for the task.
-    pub description: Option<String>,
+    pub description: Option<TaskDescription>,
     /// Updated track information for the task.
-    pub track: Option<String>,
+    pub track: Option<TaskTrack>,
     /// Updated priority value.
     pub priority: TaskPriority,
     /// Updated status value.
@@ -351,7 +348,7 @@ pub struct UpdateTask {
     /// Updated due date for the task.
     pub due_date: Option<NaiveDate>,
     /// Updated assignee for the task.
-    pub assigned_to: Option<i32>,
+    pub assigned_to: Option<UserId>,
     /// Updated completion timestamp for the task.
     pub completed_at: Option<NaiveDateTime>,
     /// Timestamp when the update payload was constructed.
@@ -379,16 +376,16 @@ impl UpdateTask {
     }
 
     /// Replace the task title.
-    pub fn title(mut self, title: impl Into<String>) -> Self {
+    pub fn title(mut self, title: TaskTitle) -> Self {
         self.touch();
-        self.title = title.into();
+        self.title = title;
         self
     }
 
     /// Update the description for the task.
-    pub fn description(mut self, description: impl Into<String>) -> Self {
+    pub fn description(mut self, description: TaskDescription) -> Self {
         self.touch();
-        self.description = Some(description.into());
+        self.description = Some(description);
         self
     }
 
@@ -400,9 +397,9 @@ impl UpdateTask {
     }
 
     /// Update the track for the task.
-    pub fn track(mut self, track: impl Into<String>) -> Self {
+    pub fn track(mut self, track: TaskTrack) -> Self {
         self.touch();
-        self.track = Some(track.into());
+        self.track = Some(track);
         self
     }
 
@@ -442,7 +439,7 @@ impl UpdateTask {
     }
 
     /// Assign the task to a specific user.
-    pub fn assign_to(mut self, assignee_id: i32) -> Self {
+    pub fn assign_to(mut self, assignee_id: UserId) -> Self {
         self.touch();
         self.assigned_to = Some(assignee_id);
         self
