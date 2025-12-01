@@ -27,6 +27,23 @@
             </div>
         </div>
         <div class="card-body">
+            {% if task.status == "Pending" or task.status == "InProgress" %}
+                <div class="mb-3">
+                    {% if task.status == "Pending" %}
+                        <form action="/task/{{ task.id }}/status" method="POST" class="d-flex gap-2 flex-wrap">
+                            <input type="hidden" name="status" value="InProgress">
+                            <input type="hidden" name="assign_self" value="true">
+                            <button type="submit" class="btn btn-outline-primary btn-sm">Взять в работу</button>
+                            <span class="text-muted small align-self-center">Статус перейдёт в «В работе»</span>
+                        </form>
+                    {% else %}
+                        <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal"
+                            data-bs-target="#completeTaskModal">
+                            Отметить как сделано
+                        </button>
+                    {% endif %}
+                </div>
+            {% endif %}
             <div class="row mb-3">
                 <div class="col-md-6">
                     <dl class="row mb-0">
@@ -130,6 +147,32 @@
                     <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить?')">Удалить</button>
                 </form>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="completeTaskModal" tabindex="-1" aria-labelledby="completeTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="/task/{{ task.id }}/status" method="POST">
+                <input type="hidden" name="status" value="Completed">
+                <div class="modal-header">
+                    <h1 class="modal-title fs-5" id="completeTaskModalLabel">Завершить задачу</h1>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Отмена"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Добавьте комментарий к завершению (необязательно).</p>
+                    <div class="mb-3">
+                        <label for="completeTaskComment" class="form-label">Комментарий</label>
+                        <textarea id="completeTaskComment" name="comment" class="form-control" rows="3"
+                            placeholder="Комментарий сохранится в истории задачи."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-success">Сохранить</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

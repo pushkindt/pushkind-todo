@@ -61,6 +61,19 @@ pub struct TaskCommentSubmission {
     pub text: String,
 }
 
+/// Form payload used for quick status actions on the task page.
+#[derive(Debug, Deserialize)]
+pub struct QuickTaskStatusForm {
+    /// Desired status to set on the task.
+    pub status: TaskStatus,
+    /// Optional comment to record alongside the status change.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub comment: Option<String>,
+    /// Whether the current user should become the assignee.
+    #[serde(default)]
+    pub assign_self: bool,
+}
+
 impl UpdateTaskForm {
     /// Convert the submitted form into a normalized update payload.
     pub fn into_submission(

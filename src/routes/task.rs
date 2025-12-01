@@ -8,7 +8,7 @@ use pushkind_common::routes::{base_context, redirect, render_template};
 use pushkind_common::zmq::ZmqSender;
 use tera::{Context, Tera};
 
-use crate::forms::task::{NewTaskCommentForm, UpdateTaskForm};
+use crate::forms::task::{NewTaskCommentForm, QuickTaskStatusForm, UpdateTaskForm};
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
@@ -109,6 +109,50 @@ pub async fn update_task(
         Err(err) => {
             log::error!("Failed to update task {task_id}: {err}");
             FlashMessage::error("Не удалось обновить задачу.").send();
+            redirect(&format!("/task/{task_id}"))
+        }
+    }
+}
+
+#[post("/task/{task_id}/status")]
+pub async fn quick_update_task_status(
+    task_id: web::Path<i32>,
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    zmq_sender: web::Data<Arc<ZmqSender>>,
+    web::Form(form): web::Form<QuickTaskStatusForm>,
+) -> impl Responder {
+    let task_id = task_id.into_inner();
+    let zmq_sender = zmq_sender.get_ref().as_ref();
+
+    match task_service::transition_task_status(
+        repo.get_ref(),
+        zmq_sender,
+        &user,
+        task_id,
+        form.status,
+        form.comment,
+        form.assign_self,
+    ) {
+        Ok(_) => {
+            FlashMessage::success("Статус задачи обновлён.").send();
+            redirect(&format!("/task/{task_id}"))
+        }
+        Err(ServiceError::Unauthorized) => {
+            FlashMessage::error("Недостаточно прав.").send();
+            redirect("/na")
+        }
+        Err(ServiceError::NotFound) => {
+            FlashMessage::error("Задача не найдена.").send();
+            redirect("/")
+        }
+        Err(ServiceError::Form(message)) => {
+            FlashMessage::error(message).send();
+            redirect(&format!("/task/{task_id}"))
+        }
+        Err(err) => {
+            log::error!("Failed to update task status {task_id}: {err}");
+            FlashMessage::error("Не удалось обновить статус задачи.").send();
             redirect(&format!("/task/{task_id}"))
         }
     }
