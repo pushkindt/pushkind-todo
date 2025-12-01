@@ -43,7 +43,7 @@ cargo fmt --all -- --check
 - Keep modules focused: domain types in `src/domain`, Diesel models in
   `src/models`, and conversions implemented via `From`/`Into`.
 - Domain structs should expose strongly typed fields (e.g., `UserEmail`,
-  `HubId`, `MenuName`, `RoleName`, `UserName`) that encode validation
+  `HubId`, `UserName`) that encode validation
   constraints. Construct these types at the boundaries (forms/services) so
   domain data is always trusted and cannot represent invalid input.
 - Define error enums with `thiserror` inside the crate that owns the failure and
