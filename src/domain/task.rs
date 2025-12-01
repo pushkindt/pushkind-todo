@@ -258,6 +258,8 @@ pub struct TaskListFilters {
     pub updated_before: Option<NaiveDateTime>,
     /// Only return tasks updated on or after this timestamp.
     pub updated_after: Option<NaiveDateTime>,
+    /// Whether tasks in terminal statuses should be excluded.
+    pub hide_terminal_statuses: bool,
 }
 
 impl TaskListFilters {
@@ -274,6 +276,7 @@ impl TaskListFilters {
             due_after: None,
             updated_before: None,
             updated_after: None,
+            hide_terminal_statuses: false,
         }
     }
 
@@ -292,6 +295,12 @@ impl TaskListFilters {
     /// Restrict the results to a particular status.
     pub fn with_status(mut self, status: TaskStatus) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Toggles whether terminal statuses should be excluded from results.
+    pub fn hide_terminal_statuses(mut self, hide: bool) -> Self {
+        self.hide_terminal_statuses = hide;
         self
     }
 
