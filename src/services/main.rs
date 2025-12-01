@@ -47,10 +47,12 @@ where
     let mut list_query = TaskListQuery::new(user.hub_id)
         .map_err(ServiceError::from)?
         .paginate(page, DEFAULT_ITEMS_PER_PAGE);
+    list_query.filters_mut().hide_terminal_statuses = true;
 
     let mut status_filter_text = None;
     if let Some(status_value) = status.as_deref().and_then(parse_status_filter) {
         list_query.filters_mut().status = Some(status_value);
+        list_query.filters_mut().hide_terminal_statuses = false;
         status_filter_text = Some((<&str>::from(status_value)).to_string());
     }
 
@@ -809,6 +811,7 @@ mod tests {
                     query.filters.search.as_ref().map(|s| s.as_str()),
                     Some("alp")
                 );
+                assert!(query.filters.hide_terminal_statuses);
                 assert!(query.filters.track.is_none());
                 assert!(query.filters.priority.is_none());
                 assert!(query.filters.assignee_id.is_none());
@@ -989,6 +992,7 @@ mod tests {
                 assert_eq!(filters.assignee_id.map(|id| id.get()), Some(24));
                 assert_eq!(filters.updated_after, Some(expected_after_ts));
                 assert_eq!(filters.updated_before, Some(expected_before_ts));
+                assert!(!filters.hide_terminal_statuses);
 
                 match pagination {
                     Some(pagination) => {
