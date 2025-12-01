@@ -1,3 +1,4 @@
+//! Core service operations powering the index page, user tracking, and pagination logic.
 use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::domain::emailer::email::NewEmail;
@@ -170,6 +171,7 @@ where
     })
 }
 
+/// Normalize a free-form status filter into a canonical `TaskStatus`.
 fn parse_status_filter(input: &str) -> Option<TaskStatus> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -182,6 +184,7 @@ fn parse_status_filter(input: &str) -> Option<TaskStatus> {
     (status_text == trimmed).then_some(status)
 }
 
+/// Normalize a priority filter string into `TaskPriority`.
 fn parse_priority_filter(input: &str) -> Option<TaskPriority> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -194,6 +197,7 @@ fn parse_priority_filter(input: &str) -> Option<TaskPriority> {
     (priority_text == trimmed).then_some(priority)
 }
 
+/// Parse an assignee identifier from text input.
 fn parse_assignee_filter(input: &str) -> Option<i32> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -203,6 +207,7 @@ fn parse_assignee_filter(input: &str) -> Option<i32> {
     trimmed.parse::<i32>().ok()
 }
 
+/// Parse a `YYYY-MM-DD` date filter into a NaiveDate.
 fn parse_date_filter(input: &str) -> Option<NaiveDate> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -212,10 +217,12 @@ fn parse_date_filter(input: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok()
 }
 
+/// Return the start-of-day timestamp for the given date.
 fn start_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
     date.and_hms_opt(0, 0, 0)
 }
 
+/// Return the end-of-day timestamp for the given date.
 fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
     date.and_hms_micro_opt(23, 59, 59, 999_999)
         .or_else(|| date.and_hms_opt(23, 59, 59))
@@ -343,6 +350,7 @@ where
     Ok(created_count)
 }
 
+/// Build a notification email informing the assignee of a new task.
 fn build_task_created_email(
     task: &Task,
     author: &User,

@@ -1,3 +1,4 @@
+//! Domain task event types capturing the recorded changes and activity on tasks.
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

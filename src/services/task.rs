@@ -1,3 +1,4 @@
+//! Task-focused service operations for loading details and applying updates.
 use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
@@ -534,6 +535,7 @@ where
     Ok(updated)
 }
 
+/// Trim and sanitize quick status comments before persisting.
 fn normalize_status_comment(value: Option<String>) -> Option<String> {
     value.and_then(|text| {
         let cleaned = ammonia::clean(&text);
@@ -546,6 +548,7 @@ fn normalize_status_comment(value: Option<String>) -> Option<String> {
     })
 }
 
+/// Adjust the update payload to reflect new assignee decisions.
 fn apply_assignment_updates(
     updates: UpdateTask,
     current_assigned_to: Option<UserId>,
@@ -561,6 +564,7 @@ fn apply_assignment_updates(
     }
 }
 
+/// Generate event data when a task status transitions.
 fn status_event_payload(current: TaskStatus, updated: TaskStatus) -> Option<Value> {
     if current == updated {
         None
@@ -574,6 +578,7 @@ fn status_event_payload(current: TaskStatus, updated: TaskStatus) -> Option<Valu
     }
 }
 
+/// Generate event data describing assignment changes.
 fn assignment_event_payload(
     previous_assignee: Option<&User>,
     new_assignee: Option<&User>,
@@ -591,6 +596,7 @@ fn assignment_event_payload(
     }
 }
 
+/// Compute metadata diffs for task update events.
 fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
     let mut changes = serde_json::Map::new();
 
@@ -663,6 +669,7 @@ fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
     }
 }
 
+/// Build notification email listing task updates for interested parties.
 fn build_task_updated_email(
     task: &Task,
     author: Option<&User>,
@@ -876,6 +883,7 @@ where
     Ok(recorded)
 }
 
+/// Build notification email for a newly added comment.
 fn build_task_comment_email(
     task: &Task,
     comment_author: &User,
@@ -913,6 +921,7 @@ fn build_task_comment_email(
     })
 }
 
+/// Serialize a user into JSON payload used by assignment events.
 fn assignment_event_user(user: &User) -> Value {
     json!({
         "id": user.id,

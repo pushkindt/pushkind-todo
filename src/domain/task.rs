@@ -1,3 +1,4 @@
+//! Domain task models capturing lifecycle state and metadata stored on each task.
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 

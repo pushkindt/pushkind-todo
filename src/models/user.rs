@@ -1,3 +1,4 @@
+//! Diesel user models bridging persisted user records with domain conversions.
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 

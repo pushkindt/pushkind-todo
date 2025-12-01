@@ -1,3 +1,4 @@
+//! Diesel repository implementation for user operations.
 use diesel::prelude::*;
 use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
@@ -8,12 +9,14 @@ use crate::{
 };
 
 impl From<crate::domain::types::TypeConstraintError> for RepositoryError {
+    /// Wrap domain constraint failures as repository validation errors.
     fn from(err: crate::domain::types::TypeConstraintError) -> Self {
         RepositoryError::ValidationError(err.to_string())
     }
 }
 
 impl UserReader for DieselRepository {
+    /// Load a user record by id within the specified hub.
     fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainUser>> {
         use crate::schema::users;
 
@@ -29,6 +32,7 @@ impl UserReader for DieselRepository {
         Ok(user.map(|u| u.try_into()).transpose()?)
     }
 
+    /// Fetch a user by email address scoped to the hub.
     fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<DomainUser>> {
         use crate::schema::users;
 
@@ -45,6 +49,7 @@ impl UserReader for DieselRepository {
         Ok(user.map(|u| u.try_into()).transpose()?)
     }
 
+    /// List users matching the supplied search/pagination filters.
     fn list_users(&self, query: UserListQuery) -> RepositoryResult<(usize, Vec<DomainUser>)> {
         use crate::schema::users;
 
@@ -98,6 +103,7 @@ impl UserReader for DieselRepository {
 }
 
 impl UserWriter for DieselRepository {
+    /// Insert or update a user uniquely identified by email+hub.
     fn create_or_update_user(&self, new_user: &DomainNewUser) -> RepositoryResult<DomainUser> {
         use crate::schema::users;
 
@@ -117,6 +123,7 @@ impl UserWriter for DieselRepository {
         Ok(db_user.try_into()?)
     }
 
+    /// Update mutable user fields and return the refreshed domain record.
     fn update_user(
         &self,
         user_id: i32,
@@ -140,6 +147,7 @@ impl UserWriter for DieselRepository {
         Ok(updated.try_into()?)
     }
 
+    /// Delete a user by id, failing if not present.
     fn delete_user(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()> {
         use crate::schema::users;
 
@@ -157,6 +165,7 @@ impl UserWriter for DieselRepository {
         Ok(())
     }
 
+    /// Update the `visited_at` timestamp for the provided user.
     fn touch_visited_at(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()> {
         use crate::schema::users;
 

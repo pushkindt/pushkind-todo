@@ -1,3 +1,4 @@
+//! Diesel repository implementation for task persistence and queries.
 use diesel::prelude::*;
 use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
@@ -14,6 +15,7 @@ use crate::{
 };
 
 impl TaskReader for DieselRepository {
+    /// Retrieve the distinct task tracks for a hub.
     fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
         use crate::schema::tasks;
 
@@ -28,6 +30,7 @@ impl TaskReader for DieselRepository {
         Ok(tracks.into_iter().flatten().collect())
     }
 
+    /// Load a single task within the hub by its identifier.
     fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTask>> {
         use crate::schema::tasks;
 
@@ -43,6 +46,7 @@ impl TaskReader for DieselRepository {
         Ok(task.map(|t| t.try_into()).transpose()?)
     }
 
+    /// Query for tasks matching the provided filters and pagination.
     fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<DomainTask>)> {
         use crate::schema::tasks;
 
@@ -151,6 +155,7 @@ impl TaskReader for DieselRepository {
         ))
     }
 
+    /// Read the history of assignments recorded for a task.
     fn list_assignments_for_task(
         &self,
         task_id: i32,
@@ -175,45 +180,49 @@ impl TaskReader for DieselRepository {
 }
 
 impl TaskWriter for DieselRepository {
+    /// Insert a new task record and return its domain representation.
     fn create_task(&self, new_task: &DomainNewTask) -> RepositoryResult<DomainTask> {
         use crate::schema::{tasks, users};
 
         let mut conn = self.conn()?;
 
-        let author_exists = users::table
-            .filter(users::id.eq(new_task.author_id.get()))
-            .filter(users::hub_id.eq(new_task.hub_id.get()))
-            .select(users::id)
-            .first::<i32>(&mut conn)
-            .optional()?;
-
-        if author_exists.is_none() {
-            return Err(RepositoryError::NotFound);
-        }
-
-        if let Some(assignee_id) = new_task.assigned_to {
-            let assignee = users::table
-                .filter(users::id.eq(assignee_id.get()))
+        conn.transaction::<DomainTask, RepositoryError, _>(|conn| {
+            let author_exists = users::table
+                .filter(users::id.eq(new_task.author_id.get()))
                 .filter(users::hub_id.eq(new_task.hub_id.get()))
                 .select(users::id)
-                .first::<i32>(&mut conn)
+                .first::<i32>(conn)
                 .optional()?;
 
-            if assignee.is_none() {
+            if author_exists.is_none() {
                 return Err(RepositoryError::NotFound);
             }
-        }
 
-        let db_new = DbNewTask::from(new_task);
+            if let Some(assignee_id) = new_task.assigned_to {
+                let assignee = users::table
+                    .filter(users::id.eq(assignee_id.get()))
+                    .filter(users::hub_id.eq(new_task.hub_id.get()))
+                    .select(users::id)
+                    .first::<i32>(conn)
+                    .optional()?;
 
-        let created = diesel::insert_into(tasks::table)
-            .values(&db_new)
-            .returning(DbTask::as_returning())
-            .get_result::<DbTask>(&mut conn)?;
+                if assignee.is_none() {
+                    return Err(RepositoryError::NotFound);
+                }
+            }
 
-        Ok(created.try_into()?)
+            let db_new = DbNewTask::from(new_task);
+
+            let created = diesel::insert_into(tasks::table)
+                .values(&db_new)
+                .returning(DbTask::as_returning())
+                .get_result::<DbTask>(conn)?;
+
+            created.try_into().map_err(RepositoryError::from)
+        })
     }
 
+    /// Persist updates to an existing task record.
     fn update_task(
         &self,
         task_id: i32,
@@ -224,33 +233,36 @@ impl TaskWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
-        if let Some(assignee_id) = updates.assigned_to {
-            let assignee = users::table
-                .filter(users::id.eq(assignee_id.get()))
-                .filter(users::hub_id.eq(hub_id))
-                .select(users::id)
-                .first::<i32>(&mut conn)
-                .optional()?;
+        conn.transaction::<DomainTask, RepositoryError, _>(|conn| {
+            if let Some(assignee_id) = updates.assigned_to {
+                let assignee = users::table
+                    .filter(users::id.eq(assignee_id.get()))
+                    .filter(users::hub_id.eq(hub_id))
+                    .select(users::id)
+                    .first::<i32>(conn)
+                    .optional()?;
 
-            if assignee.is_none() {
-                return Err(RepositoryError::NotFound);
+                if assignee.is_none() {
+                    return Err(RepositoryError::NotFound);
+                }
             }
-        }
 
-        let db_updates = DbUpdateTask::from(updates);
+            let db_updates = DbUpdateTask::from(updates);
 
-        let target = tasks::table
-            .filter(tasks::id.eq(task_id))
-            .filter(tasks::hub_id.eq(hub_id));
+            let target = tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::hub_id.eq(hub_id));
 
-        let updated = diesel::update(target)
-            .set(&db_updates)
-            .returning(DbTask::as_returning())
-            .get_result::<DbTask>(&mut conn)?;
+            let updated = diesel::update(target)
+                .set(&db_updates)
+                .returning(DbTask::as_returning())
+                .get_result::<DbTask>(conn)?;
 
-        Ok(updated.try_into()?)
+            updated.try_into().map_err(RepositoryError::from)
+        })
     }
 
+    /// Remove a task belonging to the specified hub.
     fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
         use crate::schema::tasks;
 
@@ -268,6 +280,7 @@ impl TaskWriter for DieselRepository {
         Ok(())
     }
 
+    /// Record a new assignment entry for auditing.
     fn record_assignment(&self, assignment: &DomainTaskAssignment) -> RepositoryResult<()> {
         use crate::schema::task_assignments;
 
@@ -281,6 +294,7 @@ impl TaskWriter for DieselRepository {
         Ok(())
     }
 
+    /// Remove an existing assignment snapshot for a task.
     fn remove_assignment(
         &self,
         task_id: i32,

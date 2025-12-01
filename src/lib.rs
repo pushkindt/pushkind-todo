@@ -1,3 +1,4 @@
+//! Core Actix-Web application wiring the repository, routes, and notification services into a runnable server.
 use std::sync::Arc;
 
 use actix_files::Files;
