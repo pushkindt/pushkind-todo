@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use chrono::Local;
+
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::domain::emailer::email::{NewEmail, NewEmailRecipient};
 use pushkind_common::repository::errors::RepositoryError;
@@ -316,6 +318,160 @@ where
         .get_user_by_id(updated.author_id.get(), user.hub_id)
         .map_err(ServiceError::from)?;
 
+    let event_actors = {
+        let mut actors = Vec::new();
+        let mut seen_actor_ids = HashSet::new();
+
+        let events = repo
+            .list_events_for_task(updated.id.get(), user.hub_id)
+            .map_err(ServiceError::from)?;
+
+        for event in events {
+            if let Some(actor_id) = event.user_id {
+                if !seen_actor_ids.insert(actor_id) {
+                    continue;
+                }
+
+                match repo.get_user_by_id(actor_id.get(), user.hub_id) {
+                    Ok(Some(actor)) => actors.push(actor),
+                    Ok(None) => {
+                        log::warn!(
+                            "Task {} event {} references missing actor {}",
+                            updated.id,
+                            event.id,
+                            actor_id
+                        );
+                    }
+                    Err(err) => return Err(ServiceError::from(err)),
+                }
+            }
+        }
+
+        actors
+    };
+
+    if let Some(email) = build_task_updated_email(
+        &updated,
+        author_user.as_ref(),
+        assignee_user.as_ref(),
+        &event_actors,
+        user,
+    ) && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    {
+        log::error!("Failed to queue task-updated email: {err}");
+    }
+
+    Ok(updated)
+}
+
+/// Transition the task status with a lightweight quick action from the UI.
+pub fn transition_task_status<R, Z>(
+    repo: &R,
+    zmq_sender: &Z,
+    user: &AuthenticatedUser,
+    task_id: i32,
+    new_status: TaskStatus,
+    comment: Option<String>,
+    assign_self: bool,
+) -> ServiceResult<Task>
+where
+    R: TaskReader
+        + TaskWriter
+        + TaskEventReader
+        + TaskEventWriter
+        + UserReader
+        + UserWriter
+        + ?Sized,
+    Z: ZmqSenderExt,
+{
+    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let current_task = repo
+        .get_task_by_id(task_id, user.hub_id)
+        .map_err(ServiceError::from)?
+        .ok_or(ServiceError::NotFound)?;
+
+    if current_task.status == new_status {
+        return Err(ServiceError::Form("Статус уже установлен.".to_string()));
+    }
+
+    let actor_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
+    let actor = repo.create_or_update_user(&actor_user)?;
+
+    let previous_assignee = match current_task.assigned_to {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+            Ok(user) => user,
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
+
+    let mut updates = UpdateTask::from_task(&current_task).status(new_status);
+    if new_status == TaskStatus::Completed {
+        updates = updates.completed_at(Local::now().naive_utc());
+    } else {
+        updates = updates.clear_completed_at();
+    }
+
+    if assign_self && new_status == TaskStatus::InProgress {
+        updates = updates.assign_to(actor.id);
+    }
+
+    let updated = repo
+        .update_task(task_id, user.hub_id, &updates)
+        .map_err(|err| match err {
+            RepositoryError::NotFound => ServiceError::NotFound,
+            other => ServiceError::from(other),
+        })?;
+
+    let assignee_user = match updated.assigned_to {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+            Ok(user) => user,
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
+
+    let status_event_data = status_event_payload(current_task.status, updated.status);
+    let assignment_event_data =
+        assignment_event_payload(previous_assignee.as_ref(), assignee_user.as_ref());
+
+    if status_event_data.is_some() || assignment_event_data.is_some() {
+        let mut recorded = false;
+
+        if let Some(data) = status_event_data {
+            let event = NewTaskEvent::new(
+                updated.id,
+                Some(actor.id),
+                TaskEventType::StatusChanged,
+                data,
+            );
+            repo.record_event(&event).map_err(ServiceError::from)?;
+            recorded = true;
+        }
+
+        if let Some(data) = assignment_event_data {
+            let event = NewTaskEvent::new(
+                updated.id,
+                Some(actor.id),
+                TaskEventType::AssignmentChanged,
+                data,
+            );
+            repo.record_event(&event).map_err(ServiceError::from)?;
+            recorded = true;
+        }
+
+        if recorded {
+            repo.touch_visited_at(actor.id.get(), actor.hub_id.get())?;
+        }
+    }
+
+    let author_user = repo
+        .get_user_by_id(updated.author_id.get(), user.hub_id)
+        .map_err(ServiceError::from)?;
+
     let assignee_user = match updated.assigned_to {
         Some(assignee_id) => repo
             .get_user_by_id(assignee_id.get(), user.hub_id)
@@ -366,7 +522,28 @@ where
         log::error!("Failed to queue task-updated email: {err}");
     }
 
+    if let Some(comment_text) = normalize_status_comment(comment) {
+        let form = NewTaskCommentForm {
+            message: comment_text,
+        };
+        if let Err(err) = add_task_comment(repo, zmq_sender, user, task_id, form) {
+            log::error!("Failed to attach quick status comment for task {task_id}: {err}");
+        }
+    }
+
     Ok(updated)
+}
+
+fn normalize_status_comment(value: Option<String>) -> Option<String> {
+    value.and_then(|text| {
+        let cleaned = ammonia::clean(&text);
+        let trimmed = cleaned.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 fn apply_assignment_updates(
@@ -2133,5 +2310,98 @@ mod tests {
         let result = add_task_comment(&repo, &zmq, &user, 123, form);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
+    }
+
+    #[test]
+    fn transition_task_status_requires_role() {
+        let task = sample_task(100, 1, None, 5);
+        let repo = UpdateRepo::new(task, Vec::new());
+        let user = user_with_roles(&[]);
+        let zmq = MockZmqSender {};
+
+        let result =
+            transition_task_status(&repo, &zmq, &user, 100, TaskStatus::InProgress, None, false);
+
+        assert!(matches!(result, Err(ServiceError::Unauthorized)));
+    }
+
+    #[test]
+    fn transition_task_status_records_status_event() {
+        let task = sample_task(101, 1, None, 5);
+        let repo = UpdateRepo::new(task.clone(), Vec::new());
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let updated = transition_task_status(
+            &repo,
+            &zmq,
+            &user,
+            task.id.get(),
+            TaskStatus::InProgress,
+            None,
+            false,
+        )
+        .expect("should transition status");
+
+        assert_eq!(updated.status, TaskStatus::InProgress);
+
+        let events = repo.events.borrow();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, TaskEventType::StatusChanged);
+    }
+
+    #[test]
+    fn transition_task_status_assigns_current_user() {
+        let task = sample_task(150, 1, None, 5);
+        let repo = UpdateRepo::new(task.clone(), Vec::new());
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        transition_task_status(
+            &repo,
+            &zmq,
+            &user,
+            task.id.get(),
+            TaskStatus::InProgress,
+            None,
+            true,
+        )
+        .expect("should transition and assign");
+
+        let stored = repo.task.borrow().clone();
+        let assigned_user = repo
+            .user_by_email(user.email.as_str())
+            .expect("actor should be created");
+
+        assert_eq!(stored.assigned_to, Some(assigned_user.id));
+
+        let events = repo.events.borrow();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, TaskEventType::StatusChanged);
+        assert_eq!(events[1].event_type, TaskEventType::AssignmentChanged);
+    }
+
+    #[test]
+    fn transition_task_status_with_comment_records_comment_event() {
+        let task = sample_task(102, 1, None, 5);
+        let repo = UpdateRepo::new(task.clone(), Vec::new());
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        transition_task_status(
+            &repo,
+            &zmq,
+            &user,
+            task.id.get(),
+            TaskStatus::Completed,
+            Some("Готово".to_string()),
+            false,
+        )
+        .expect("should transition status with comment");
+
+        let events = repo.events.borrow();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, TaskEventType::StatusChanged);
+        assert_eq!(events[1].event_type, TaskEventType::Comment);
     }
 }

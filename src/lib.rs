@@ -16,7 +16,9 @@ use tera::Tera;
 use crate::models::config::ServerConfig;
 use crate::repository::DieselRepository;
 use crate::routes::main::{add_task, show_index, tasks_upload};
-use crate::routes::task::{add_task_comment, delete_task, show_task, task_modal, update_task};
+use crate::routes::task::{
+    add_task_comment, delete_task, quick_update_task_status, show_task, task_modal, update_task,
+};
 
 pub mod domain;
 pub mod dto;
@@ -85,6 +87,7 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
                     .service(task_modal)
                     .service(add_task_comment)
                     .service(update_task)
+                    .service(quick_update_task_status)
                     .service(delete_task)
                     .service(logout),
             )
