@@ -4,6 +4,7 @@ use pushkind_common::domain::emailer::email::NewEmail;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::check_role;
 use pushkind_common::zmq::ZmqSenderExt;
+use std::collections::HashMap;
 
 use validator::Validate;
 
@@ -17,7 +18,7 @@ use crate::repository::{
 use crate::services::{ServiceError, ServiceResult};
 
 use super::notifications;
-use crate::dto::main::{IndexPageData, IndexPageFilters, IndexQuery};
+use crate::dto::main::{IndexPageData, IndexPageFilters, IndexQuery, IndexTask};
 
 /// Loads the tasks list for the main index page.
 pub fn load_index_page<R>(
@@ -120,6 +121,12 @@ where
         .list_users(UserListQuery::new(user.hub_id.get()))
         .map_err(ServiceError::from)?;
 
+    let users_by_id = users
+        .iter()
+        .cloned()
+        .map(|user| (user.id, user))
+        .collect::<HashMap<_, _>>();
+
     let recently_updated_task_ids = visited_at
         .map(|visited| {
             tasks
@@ -131,7 +138,16 @@ where
         .unwrap_or_default();
 
     let total_pages = total.div_ceil(DEFAULT_ITEMS_PER_PAGE);
-    let tasks = Paginated::new(tasks, page, total_pages);
+    let task_entries = tasks
+        .into_iter()
+        .map(|task| IndexTask {
+            assignee: task
+                .assigned_to
+                .and_then(|assignee_id| users_by_id.get(&assignee_id).cloned()),
+            task,
+        })
+        .collect::<Vec<_>>();
+    let tasks = Paginated::new(task_entries, page, total_pages);
 
     let filters = IndexPageFilters {
         search,
@@ -884,7 +900,8 @@ mod tests {
         let first_title = items
             .first()
             .and_then(|item| item.as_object())
-            .and_then(|map| map.get("title"))
+            .and_then(|map| map.get("task"))
+            .and_then(|task| task.get("title"))
             .and_then(Value::as_str);
         assert_eq!(first_title, Some("alpha"));
     }

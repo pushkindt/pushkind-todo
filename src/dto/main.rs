@@ -45,7 +45,7 @@ pub struct IndexPageFilters {
 
 pub struct IndexPageData {
     /// Paginated list of tasks to show in the table.
-    pub tasks: Paginated<Task>,
+    pub tasks: Paginated<IndexTask>,
     /// Filters currently applied to the task list.
     pub filters: IndexPageFilters,
     /// Users available in the current hub.
@@ -54,4 +54,13 @@ pub struct IndexPageData {
     pub recently_updated_task_ids: Vec<i32>,
     /// Available task tracks to use for hints
     pub tracks: Vec<String>,
+}
+
+/// Task metadata displayed on the index page alongside assignee info.
+#[derive(Debug, Serialize)]
+pub struct IndexTask {
+    /// Task details shown in the list.
+    pub task: Task,
+    /// Assignee of the task when available in the current hub.
+    pub assignee: Option<User>,
 }
