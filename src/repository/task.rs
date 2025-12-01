@@ -186,38 +186,40 @@ impl TaskWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
-        let author_exists = users::table
-            .filter(users::id.eq(new_task.author_id.get()))
-            .filter(users::hub_id.eq(new_task.hub_id.get()))
-            .select(users::id)
-            .first::<i32>(&mut conn)
-            .optional()?;
-
-        if author_exists.is_none() {
-            return Err(RepositoryError::NotFound);
-        }
-
-        if let Some(assignee_id) = new_task.assigned_to {
-            let assignee = users::table
-                .filter(users::id.eq(assignee_id.get()))
+        conn.transaction::<DomainTask, RepositoryError, _>(|conn| {
+            let author_exists = users::table
+                .filter(users::id.eq(new_task.author_id.get()))
                 .filter(users::hub_id.eq(new_task.hub_id.get()))
                 .select(users::id)
-                .first::<i32>(&mut conn)
+                .first::<i32>(conn)
                 .optional()?;
 
-            if assignee.is_none() {
+            if author_exists.is_none() {
                 return Err(RepositoryError::NotFound);
             }
-        }
 
-        let db_new = DbNewTask::from(new_task);
+            if let Some(assignee_id) = new_task.assigned_to {
+                let assignee = users::table
+                    .filter(users::id.eq(assignee_id.get()))
+                    .filter(users::hub_id.eq(new_task.hub_id.get()))
+                    .select(users::id)
+                    .first::<i32>(conn)
+                    .optional()?;
 
-        let created = diesel::insert_into(tasks::table)
-            .values(&db_new)
-            .returning(DbTask::as_returning())
-            .get_result::<DbTask>(&mut conn)?;
+                if assignee.is_none() {
+                    return Err(RepositoryError::NotFound);
+                }
+            }
 
-        Ok(created.try_into()?)
+            let db_new = DbNewTask::from(new_task);
+
+            let created = diesel::insert_into(tasks::table)
+                .values(&db_new)
+                .returning(DbTask::as_returning())
+                .get_result::<DbTask>(conn)?;
+
+            created.try_into().map_err(RepositoryError::from)
+        })
     }
 
     /// Persist updates to an existing task record.
@@ -231,31 +233,33 @@ impl TaskWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
-        if let Some(assignee_id) = updates.assigned_to {
-            let assignee = users::table
-                .filter(users::id.eq(assignee_id.get()))
-                .filter(users::hub_id.eq(hub_id))
-                .select(users::id)
-                .first::<i32>(&mut conn)
-                .optional()?;
+        conn.transaction::<DomainTask, RepositoryError, _>(|conn| {
+            if let Some(assignee_id) = updates.assigned_to {
+                let assignee = users::table
+                    .filter(users::id.eq(assignee_id.get()))
+                    .filter(users::hub_id.eq(hub_id))
+                    .select(users::id)
+                    .first::<i32>(conn)
+                    .optional()?;
 
-            if assignee.is_none() {
-                return Err(RepositoryError::NotFound);
+                if assignee.is_none() {
+                    return Err(RepositoryError::NotFound);
+                }
             }
-        }
 
-        let db_updates = DbUpdateTask::from(updates);
+            let db_updates = DbUpdateTask::from(updates);
 
-        let target = tasks::table
-            .filter(tasks::id.eq(task_id))
-            .filter(tasks::hub_id.eq(hub_id));
+            let target = tasks::table
+                .filter(tasks::id.eq(task_id))
+                .filter(tasks::hub_id.eq(hub_id));
 
-        let updated = diesel::update(target)
-            .set(&db_updates)
-            .returning(DbTask::as_returning())
-            .get_result::<DbTask>(&mut conn)?;
+            let updated = diesel::update(target)
+                .set(&db_updates)
+                .returning(DbTask::as_returning())
+                .get_result::<DbTask>(conn)?;
 
-        Ok(updated.try_into()?)
+            updated.try_into().map_err(RepositoryError::from)
+        })
     }
 
     /// Remove a task belonging to the specified hub.

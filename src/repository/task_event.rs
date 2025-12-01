@@ -105,19 +105,23 @@ impl TaskEventWriter for DieselRepository {
 
         let mut conn = self.conn()?;
 
-        let exists = task_events::table
-            .inner_join(tasks::table)
-            .filter(task_events::id.eq(id))
-            .filter(tasks::hub_id.eq(hub_id))
-            .select(task_events::id)
-            .first::<i32>(&mut conn)
-            .optional()?;
+        conn.transaction::<(), RepositoryError, _>(|conn| {
+            let exists = task_events::table
+                .inner_join(tasks::table)
+                .filter(task_events::id.eq(id))
+                .filter(tasks::hub_id.eq(hub_id))
+                .select(task_events::id)
+                .first::<i32>(conn)
+                .optional()?;
 
-        let Some(_) = exists else {
-            return Err(RepositoryError::NotFound);
-        };
+            let Some(_) = exists else {
+                return Err(RepositoryError::NotFound);
+            };
 
-        diesel::delete(task_events::table.filter(task_events::id.eq(id))).execute(&mut conn)?;
+            diesel::delete(task_events::table.filter(task_events::id.eq(id))).execute(conn)?;
+
+            Ok(())
+        })?;
 
         Ok(())
     }
