@@ -122,9 +122,11 @@ impl TaskReader for DieselRepository {
             if hide_terminal_statuses {
                 let completed = <&str>::from(TaskStatus::Completed);
                 let archived = <&str>::from(TaskStatus::Archived);
+                let blocked = <&str>::from(TaskStatus::Blocked);
                 items = items
                     .filter(tasks::status.ne(completed))
-                    .filter(tasks::status.ne(archived));
+                    .filter(tasks::status.ne(archived))
+                    .filter(tasks::status.ne(blocked));
             }
 
             items
