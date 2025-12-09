@@ -1,8 +1,9 @@
 //! Repository layer definitions and Diesel-backed implementations used throughout the services.
 use pushkind_common::db::{DbConnection, DbPool};
 use pushkind_common::pagination::Pagination;
-use pushkind_common::repository::errors::RepositoryResult;
+use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
+use crate::domain::types::TypeConstraintError;
 use crate::domain::{
     task::{NewTask, Task, TaskAssignment, TaskListFilters, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent},
@@ -181,4 +182,10 @@ pub trait TaskEventWriter {
     fn record_event(&self, event: &NewTaskEvent) -> RepositoryResult<TaskEvent>;
     /// Delete a task event by id/hub.
     fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()>;
+}
+
+impl From<TypeConstraintError> for RepositoryError {
+    fn from(err: TypeConstraintError) -> Self {
+        RepositoryError::ValidationError(err.to_string())
+    }
 }

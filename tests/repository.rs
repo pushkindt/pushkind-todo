@@ -21,7 +21,7 @@ mod common;
 
 #[test]
 fn test_user_repository_crud() {
-    let test_db = common::TestDb::new("test_user_repository_crud.db");
+    let test_db = common::TestDb::new();
     let repo = DieselRepository::new(test_db.pool());
 
     let hub_id = HubId::new(1).unwrap();
@@ -114,7 +114,7 @@ fn test_user_repository_crud() {
 
 #[test]
 fn test_task_event_repository_crud() {
-    let test_db = common::TestDb::new("test_task_event_repository_crud.db");
+    let test_db = common::TestDb::new();
     let repo = DieselRepository::new(test_db.pool());
     let hub_id = HubId::new(1).unwrap();
 
@@ -207,7 +207,7 @@ fn test_task_event_repository_crud() {
 
 #[test]
 fn test_task_repository_crud() {
-    let test_db = common::TestDb::new("test_task_repository_crud.db");
+    let test_db = common::TestDb::new();
     let repo = DieselRepository::new(test_db.pool());
     let hub_id = HubId::new(1).unwrap();
 
