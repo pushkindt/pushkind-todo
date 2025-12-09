@@ -8,13 +8,6 @@ use crate::{
     repository::{DieselRepository, UserListQuery, UserReader, UserWriter},
 };
 
-impl From<crate::domain::types::TypeConstraintError> for RepositoryError {
-    /// Wrap domain constraint failures as repository validation errors.
-    fn from(err: crate::domain::types::TypeConstraintError) -> Self {
-        RepositoryError::ValidationError(err.to_string())
-    }
-}
-
 impl UserReader for DieselRepository {
     /// Load a user record by id within the specified hub.
     fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainUser>> {
