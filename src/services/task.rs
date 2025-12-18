@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 use chrono::Local;
 
 use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::domain::emailer::email::{NewEmail, NewEmailRecipient};
 use pushkind_common::repository::errors::RepositoryError;
-use pushkind_common::routes::check_role;
+use pushkind_common::routes::ensure_role;
 use pushkind_common::zmq::ZmqSenderExt;
+use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
 
 use serde_json::{Value, json};
 use validator::Validate;
@@ -37,9 +37,7 @@ pub fn load_task_details<R>(
 where
     R: TaskReader + TaskEventReader + UserReader + ?Sized,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     let task = repo
         .get_task_by_id(task_id, user.hub_id)
@@ -114,9 +112,7 @@ pub fn load_task_modal<R>(
 where
     R: TaskReader + UserReader + ?Sized,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     let task = repo
         .get_task_by_id(task_id, user.hub_id)
@@ -172,9 +168,7 @@ where
         + ?Sized,
     Z: ZmqSenderExt,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     if let Err(err) = form.validate() {
         log::error!("Failed to validate form: {err}");
@@ -385,9 +379,7 @@ where
         + ?Sized,
     Z: ZmqSenderExt,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     let current_task = repo
         .get_task_by_id(task_id, user.hub_id)
@@ -687,36 +679,34 @@ fn build_task_updated_email(
     if let Some(author) = author {
         let email = author.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
-            recipients.push(notifications::task_recipient(
-                task,
-                author,
-                "task_updated",
-                "author",
-            ));
+            match notifications::task_recipient(task, author, "task_updated", "author") {
+                Ok(recipient) => recipients.push(recipient),
+                Err(err) => log::error!("Failed to build task-updated recipient for author: {err}"),
+            }
         }
     }
 
     if let Some(assignee) = assignee {
         let email = assignee.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
-            recipients.push(notifications::task_recipient(
-                task,
-                assignee,
-                "task_updated",
-                "assignee",
-            ));
+            match notifications::task_recipient(task, assignee, "task_updated", "assignee") {
+                Ok(recipient) => recipients.push(recipient),
+                Err(err) => {
+                    log::error!("Failed to build task-updated recipient for assignee: {err}")
+                }
+            }
         }
     }
 
     for event_actor in event_actors {
         let email = event_actor.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
-            recipients.push(notifications::task_recipient(
-                task,
-                event_actor,
-                "task_updated",
-                "event_actor",
-            ));
+            match notifications::task_recipient(task, event_actor, "task_updated", "event_actor") {
+                Ok(recipient) => recipients.push(recipient),
+                Err(err) => {
+                    log::error!("Failed to build task-updated recipient for event actor: {err}")
+                }
+            }
         }
     }
 
@@ -752,15 +742,16 @@ fn build_task_updated_email(
         message.push_str(description.as_str());
     }
 
-    Some(NewEmail {
+    NewEmail::try_new(
+        actor.hub_id,
         message,
-        subject: Some(format!("Обновление задачи: {}", sanitized_title)),
-        attachment: None,
-        attachment_name: None,
-        attachment_mime: None,
-        hub_id: actor.hub_id,
+        Some(format!("Обновление задачи: {}", sanitized_title)),
+        None,
+        None,
+        None,
         recipients,
-    })
+    )
+    .ok()
 }
 
 /// Record a new comment on the specified task from the current user.
@@ -775,9 +766,7 @@ where
     R: TaskReader + TaskEventReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
     Z: ZmqSenderExt,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     if let Err(err) = form.validate() {
         log::error!("Failed to validate comment form: {err}");
@@ -827,24 +816,24 @@ where
     if let Some(author) = task_author {
         let email = author.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
-            recipients.push(notifications::task_recipient(
-                &task,
-                &author,
-                "task_commented",
-                "author",
-            ));
+            match notifications::task_recipient(&task, &author, "task_commented", "author") {
+                Ok(recipient) => recipients.push(recipient),
+                Err(err) => {
+                    log::error!("Failed to build task-comment recipient for author: {err}")
+                }
+            }
         }
     }
 
     if let Some(assignee) = task_assignee {
         let email = assignee.email.as_str().trim().to_lowercase();
         if email != actor_email && seen.insert(email.clone()) {
-            recipients.push(notifications::task_recipient(
-                &task,
-                &assignee,
-                "task_commented",
-                "assignee",
-            ));
+            match notifications::task_recipient(&task, &assignee, "task_commented", "assignee") {
+                Ok(recipient) => recipients.push(recipient),
+                Err(err) => {
+                    log::error!("Failed to build task-comment recipient for assignee: {err}")
+                }
+            }
         }
     }
 
@@ -864,12 +853,13 @@ where
         {
             let email = actor.email.as_str().trim().to_lowercase();
             if email != actor_email && seen.insert(email.clone()) {
-                recipients.push(notifications::task_recipient(
-                    &task,
-                    &actor,
-                    "task_commented",
-                    "event_actor",
-                ));
+                match notifications::task_recipient(&task, &actor, "task_commented", "event_actor")
+                {
+                    Ok(recipient) => recipients.push(recipient),
+                    Err(err) => {
+                        log::error!("Failed to build task-comment recipient for event actor: {err}")
+                    }
+                }
             }
         }
     }
@@ -910,15 +900,16 @@ fn build_task_comment_email(
         message.push_str(&sanitized_body);
     }
 
-    Some(NewEmail {
+    NewEmail::try_new(
+        comment_author.hub_id.get(),
         message,
-        subject: Some(format!("Новый комментарий в задаче: {}", sanitized_title)),
-        attachment: None,
-        attachment_name: None,
-        attachment_mime: None,
-        hub_id: comment_author.hub_id.get(),
+        Some(format!("Новый комментарий в задаче: {}", sanitized_title)),
+        None,
+        None,
+        None,
         recipients,
-    })
+    )
+    .ok()
 }
 
 /// Serialize a user into JSON payload used by assignment events.
@@ -935,9 +926,7 @@ pub fn delete_task<R>(repo: &R, user: &AuthenticatedUser, task_id: i32) -> Servi
 where
     R: TaskReader + TaskWriter + ?Sized,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     if repo
         .get_task_by_id(task_id, user.hub_id)
@@ -960,9 +949,9 @@ where
 mod tests {
     use super::*;
     use chrono::{NaiveDate, NaiveDateTime};
-    use pushkind_common::models::emailer::zmq::ZMQSendEmailMessage;
     use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
     use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderTrait};
+    use pushkind_emailer::models::zmq::ZMQSendEmailMessage;
     use serde_json::json;
     use std::cell::RefCell;
     use std::sync::Mutex;
@@ -1943,11 +1932,11 @@ mod tests {
                 assert!(addresses.contains(assignee.email.as_str()));
                 assert!(addresses.contains(commenter.email.as_str()));
                 assert_eq!(
-                    email.subject.as_deref(),
+                    email.subject.as_ref().map(|subject| subject.as_str()),
                     Some("Обновление задачи: Updated title"),
                 );
-                assert!(email.message.contains("Updated title"));
-                assert!(email.message.contains("Test User"));
+                assert!(email.message.as_str().contains("Updated title"));
+                assert!(email.message.as_str().contains("Test User"));
             }
             _ => panic!("unexpected email payload variant"),
         }
@@ -2264,10 +2253,10 @@ mod tests {
                 assert!(!addresses.contains(user.email.as_str()));
 
                 assert_eq!(
-                    email.subject.as_deref(),
+                    email.subject.as_ref().map(|subject| subject.as_str()),
                     Some("Новый комментарий в задаче: Test Task"),
                 );
-                assert!(email.message.contains("Комментарий"));
+                assert!(email.message.as_str().contains("Комментарий"));
             }
             _ => panic!("unexpected email payload variant"),
         }
