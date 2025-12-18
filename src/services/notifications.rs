@@ -1,17 +1,17 @@
 //! Notification helpers that build and enqueue emails via ZeroMQ.
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use log::error;
 use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::domain::emailer::email::{NewEmail, NewEmailRecipient};
-use pushkind_common::models::emailer::zmq::ZMQSendEmailMessage;
 use pushkind_common::zmq::ZmqSenderExt;
+use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
+use pushkind_emailer::domain::types::{RecipientEmail, RecipientName};
+use pushkind_emailer::models::zmq::ZMQSendEmailMessage;
 
 use crate::domain::{task::Task, user::User};
 use crate::services::{ServiceError, ServiceResult};
 
 /// Serialize the email payload and enqueue it for delivery via ZeroMQ.
-/// Serialize the email payload and send it through ZeroMQ.
 pub(super) fn queue_email<Z>(
     zmq_sender: &Z,
     actor: &AuthenticatedUser,
@@ -41,8 +41,8 @@ pub(super) fn task_recipient(
     user: &User,
     notification_kind: &str,
     recipient_role: &str,
-) -> NewEmailRecipient {
-    let mut fields = HashMap::new();
+) -> ServiceResult<NewEmailRecipient> {
+    let mut fields = BTreeMap::new();
     fields.insert("task_id".to_string(), task.id.to_string());
     fields.insert("task_title".to_string(), task.title.to_string());
     fields.insert("task_status".to_string(), format!("{:?}", task.status));
@@ -52,11 +52,11 @@ pub(super) fn task_recipient(
     );
     fields.insert("recipient_role".to_string(), recipient_role.to_string());
 
-    NewEmailRecipient {
-        address: user.email.to_string(),
-        name: user.name.to_string(),
+    Ok(NewEmailRecipient {
+        address: RecipientEmail::new(user.email.as_str())?,
+        name: RecipientName::new(user.name.as_str())?,
         fields,
-    }
+    })
 }
 
 /// Clean and normalize text before embedding in outgoing notifications.

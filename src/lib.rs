@@ -23,6 +23,7 @@ use crate::routes::task::{
 
 pub mod domain;
 pub mod dto;
+pub mod error_conversions;
 pub mod forms;
 pub mod models;
 pub mod repository;

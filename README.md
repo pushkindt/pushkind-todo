@@ -189,7 +189,7 @@ isolate services from the database when writing new tests.
   services, and repositories—propagate errors instead.
 - **Security aware**: sanitize any user-supplied HTML using `ammonia`, validate
   inputs with `validator`, and always enforce role checks with
-  `pushkind_common::routes::check_role`.
+  `pushkind_common::routes::ensure_role`.
 - **Testable**: accept traits rather than concrete types in services and prefer
   dependency injection so the mock repositories can be used in tests.
 

@@ -1,10 +1,10 @@
 //! Core service operations powering the index page, user tracking, and pagination logic.
 use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::domain::emailer::email::NewEmail;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
-use pushkind_common::routes::check_role;
+use pushkind_common::routes::ensure_role;
 use pushkind_common::zmq::ZmqSenderExt;
+use pushkind_emailer::domain::email::NewEmail;
 use std::collections::HashMap;
 
 use validator::Validate;
@@ -30,9 +30,7 @@ pub fn load_index_page<R>(
 where
     R: TaskReader + UserReader + UserWriter + ?Sized,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     let IndexQuery {
         search,
@@ -239,9 +237,7 @@ where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
     Z: ZmqSenderExt,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     if let Err(err) = form.validate() {
         log::error!("Failed to validate form: {err}");
@@ -302,11 +298,18 @@ where
         err
     })?;
 
-    if let Some(assignee) = assignee_user.as_ref()
-        && let Some(email) = build_task_created_email(&created, &author, assignee, user)
-        && let Err(err) = notifications::queue_email(zmq_sender, user, email)
-    {
-        log::error!("Failed to queue task-created email: {err}");
+    if let Some(assignee) = assignee_user.as_ref() {
+        match build_task_created_email(&created, &author, assignee, user) {
+            Ok(Some(email)) => {
+                if let Err(err) = notifications::queue_email(zmq_sender, user, email) {
+                    log::error!("Failed to queue task-created email: {err}");
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                log::error!("Failed to build task-created email: {err}");
+            }
+        }
     }
 
     repo.touch_visited_at(author.id.get(), author.hub_id.get())?;
@@ -323,9 +326,7 @@ pub fn upload_tasks<R>(
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
-    if !check_role(SERVICE_ACCESS_ROLE, &user.roles) {
-        return Err(ServiceError::Unauthorized);
-    }
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
     let new_user: crate::domain::user::NewUser =
         user.try_into().map_err(|_| ServiceError::Internal)?;
@@ -356,12 +357,12 @@ fn build_task_created_email(
     author: &User,
     assignee: &User,
     actor: &AuthenticatedUser,
-) -> Option<NewEmail> {
+) -> ServiceResult<Option<NewEmail>> {
     let actor_email = actor.email.trim().to_lowercase();
     let assignee_email = assignee.email.as_str().trim().to_lowercase();
 
     if actor_email == assignee_email {
-        return None;
+        return Ok(None);
     }
 
     let sanitized_title = notifications::sanitize_text(task.title.as_str());
@@ -381,17 +382,23 @@ fn build_task_created_email(
         message.push_str(description.as_str());
     }
 
-    let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee");
+    let recipient = notifications::task_recipient(task, assignee, "task_created", "assignee")?;
 
-    Some(NewEmail {
+    let email = NewEmail::try_new(
+        actor.hub_id,
         message,
-        subject: Some(format!("Вам назначена задача: {}", sanitized_title)),
-        attachment: None,
-        attachment_name: None,
-        attachment_mime: None,
-        hub_id: actor.hub_id,
-        recipients: vec![recipient],
-    })
+        Some(format!("Вам назначена задача: {}", sanitized_title)),
+        None,
+        None,
+        None,
+        vec![recipient],
+    )
+    .map_err(|err| {
+        log::error!("Failed to build task-created email payload: {err}");
+        ServiceError::Internal
+    })?;
+
+    Ok(Some(email))
 }
 
 #[cfg(test)]
@@ -400,9 +407,9 @@ mod tests {
     use actix_multipart::form::tempfile::TempFile;
     use chrono::{Duration, NaiveDate, NaiveDateTime};
     use mockall::Sequence;
-    use pushkind_common::models::emailer::zmq::ZMQSendEmailMessage;
     use pushkind_common::repository::errors::RepositoryError;
     use pushkind_common::zmq::{SendFuture, ZmqSenderError, ZmqSenderTrait};
+    use pushkind_emailer::models::zmq::ZMQSendEmailMessage;
     use serde_json::Value;
     use tempfile::NamedTempFile;
 
@@ -1464,12 +1471,12 @@ mod tests {
             ZMQSendEmailMessage::NewEmail(message) => {
                 let (actor, email) = *message;
                 assert_eq!(actor.email, user.email);
-                assert_eq!(email.hub_id, user.hub_id);
+                assert_eq!(email.hub_id.get(), user.hub_id);
                 assert_eq!(email.recipients.len(), 1);
 
                 let recipient = &email.recipients[0];
-                assert_eq!(recipient.address, assignee_record.email.as_str());
-                assert_eq!(recipient.name, assignee_record.name.as_str());
+                assert_eq!(recipient.address.as_str(), assignee_record.email.as_str());
+                assert_eq!(recipient.name.as_str(), assignee_record.name.as_str());
                 assert_eq!(
                     recipient
                         .fields
@@ -1483,10 +1490,10 @@ mod tests {
                     Some(expected_task_id.as_str()),
                 );
                 assert_eq!(
-                    email.subject.as_deref(),
+                    email.subject.as_ref().map(|subject| subject.as_str()),
                     Some("Вам назначена задача: New Task"),
                 );
-                assert!(email.message.contains("New Task"));
+                assert!(email.message.as_str().contains("New Task"));
             }
             _ => panic!("unexpected email payload variant"),
         }
