@@ -3,6 +3,7 @@ use pushkind_common::db::{DbConnection, DbPool};
 use pushkind_common::pagination::Pagination;
 use pushkind_common::repository::errors::RepositoryResult;
 
+use crate::domain::types::{HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId};
 use crate::domain::{
     task::{NewTask, Task, TaskAssignment, TaskListFilters, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent},
@@ -37,14 +38,14 @@ impl DieselRepository {
 #[derive(Debug, Clone)]
 /// Query definition used to filter and paginate users for a hub.
 pub struct UserListQuery {
-    pub hub_id: i32,
+    pub hub_id: HubId,
     pub search: Option<String>,
     pub pagination: Option<Pagination>,
 }
 
 impl UserListQuery {
     /// Construct a query scoped to the provided hub.
-    pub fn new(hub_id: i32) -> Self {
+    pub fn new(hub_id: HubId) -> Self {
         Self {
             hub_id,
             search: None,
@@ -74,12 +75,11 @@ pub struct TaskListQuery {
 
 impl TaskListQuery {
     /// Construct a query scoped to the given hub using default filters.
-    pub fn new(hub_id: i32) -> Result<Self, crate::domain::types::TypeConstraintError> {
-        let hub_id = crate::domain::types::HubId::new(hub_id)?;
-        Ok(Self {
+    pub fn new(hub_id: HubId) -> Self {
+        Self {
             filters: TaskListFilters::new(hub_id),
             pagination: None,
-        })
+        }
     }
 
     /// Replace the filters used by the query.
@@ -103,9 +103,10 @@ impl TaskListQuery {
 /// Read-only operations over user records.
 pub trait UserReader {
     /// Get a user by identifier within the hub.
-    fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>>;
+    fn get_user_by_id(&self, id: UserId, hub_id: HubId) -> RepositoryResult<Option<User>>;
     /// Lookup a user by email scoped to the hub.
-    fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<User>>;
+    fn get_user_by_email(&self, email: &UserEmail, hub_id: HubId)
+    -> RepositoryResult<Option<User>>;
     /// List users matching the query filters.
     fn list_users(&self, query: UserListQuery) -> RepositoryResult<(usize, Vec<User>)>;
 }
@@ -117,30 +118,30 @@ pub trait UserWriter {
     /// Update mutable fields for an existing user.
     fn update_user(
         &self,
-        user_id: i32,
-        hub_id: i32,
+        user_id: UserId,
+        hub_id: HubId,
         updates: &UpdateUser,
     ) -> RepositoryResult<User>;
     /// Delete a user record by identifier.
-    fn delete_user(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()>;
+    fn delete_user(&self, user_id: UserId, hub_id: HubId) -> RepositoryResult<()>;
     /// Touch the user's `visited_at` timestamp.
-    fn touch_visited_at(&self, user_id: i32, hub_id: i32) -> RepositoryResult<()>;
+    fn touch_visited_at(&self, user_id: UserId, hub_id: HubId) -> RepositoryResult<()>;
 }
 
 /// Read-only operations over task records.
 pub trait TaskReader {
     /// Fetch a task by id within the hub.
-    fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>>;
+    fn get_task_by_id(&self, id: TaskId, hub_id: HubId) -> RepositoryResult<Option<Task>>;
     /// List tasks with filtering/pagination support.
     fn list_tasks(&self, query: TaskListQuery) -> RepositoryResult<(usize, Vec<Task>)>;
     /// Read all assignments for a task.
     fn list_assignments_for_task(
         &self,
-        task_id: i32,
-        hub_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
     ) -> RepositoryResult<Vec<TaskAssignment>>;
     /// Return available task tracks for a hub.
-    fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>>;
+    fn list_task_tracks(&self, hub_id: HubId) -> RepositoryResult<Vec<TaskTrack>>;
 }
 
 /// Write operations over task records.
@@ -150,29 +151,31 @@ pub trait TaskWriter {
     /// Persist updates to a task.
     fn update_task(
         &self,
-        task_id: i32,
-        hub_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
         updates: &UpdateTask,
     ) -> RepositoryResult<Task>;
     /// Delete a task from the hub.
-    fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()>;
+    fn delete_task(&self, task_id: TaskId, hub_id: HubId) -> RepositoryResult<()>;
     /// Save a new assignment entry for auditing.
     fn record_assignment(&self, assignment: &TaskAssignment) -> RepositoryResult<()>;
     /// Remove an assignment snapshot.
     fn remove_assignment(
         &self,
-        task_id: i32,
-        hub_id: i32,
-        assignee_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
+        assignee_id: UserId,
     ) -> RepositoryResult<()>;
 }
 
 /// Read-only operations over task event records.
 pub trait TaskEventReader {
     /// Stream events tied to the provided task.
-    fn list_events_for_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<Vec<TaskEvent>>;
-    /// Lookup a task event by id and hub.
-    fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>>;
+    fn list_events_for_task(
+        &self,
+        task_id: TaskId,
+        hub_id: HubId,
+    ) -> RepositoryResult<Vec<TaskEvent>>;
 }
 
 /// Write operations over task event records.
@@ -180,5 +183,5 @@ pub trait TaskEventWriter {
     /// Persist a new task event entry.
     fn record_event(&self, event: &NewTaskEvent) -> RepositoryResult<TaskEvent>;
     /// Delete a task event by id/hub.
-    fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()>;
+    fn delete_event(&self, id: TaskEventId, hub_id: HubId) -> RepositoryResult<()>;
 }

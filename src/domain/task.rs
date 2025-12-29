@@ -2,7 +2,9 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
-use super::types::{HubId, SearchTerm, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId};
+use super::types::{
+    HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, TypeConstraintError, UserId,
+};
 
 /// Status assigned to a task as it moves through its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -23,7 +25,7 @@ pub enum TaskStatus {
 impl TaskStatus {
     /// Whether the status represents a terminal state where no additional work is required.
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Archived)
+        matches!(self, Self::Completed | Self::Archived | Self::Blocked)
     }
 }
 
@@ -49,12 +51,14 @@ impl From<TaskPriority> for &'static str {
     }
 }
 
-impl From<&str> for TaskPriority {
-    fn from(value: &str) -> Self {
-        match value {
-            "Low" => TaskPriority::Low,
-            "High" => TaskPriority::High,
-            _ => TaskPriority::Middle,
+impl TryFrom<&str> for TaskPriority {
+    type Error = TypeConstraintError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.trim().to_lowercase().as_str() {
+            "low" => Ok(TaskPriority::Low),
+            "high" => Ok(TaskPriority::High),
+            "middle" => Ok(TaskPriority::Middle),
+            _ => Err(TypeConstraintError::InvalidTaskPriority),
         }
     }
 }
@@ -143,6 +147,18 @@ impl NewTask {
         }
     }
 
+    /// Attempts to construct a new task payload from raw input values.
+    pub fn try_new<T>(hub_id: i32, author_id: i32, title: T) -> Result<Self, TypeConstraintError>
+    where
+        T: Into<String>,
+    {
+        let hub_id = HubId::new(hub_id)?;
+        let author_id = UserId::new(author_id)?;
+        let title = TaskTitle::new(title)?;
+
+        Ok(Self::new(hub_id, author_id, title))
+    }
+
     /// Set a description for the task.
     pub fn description(mut self, description: TaskDescription) -> Self {
         self.description = Some(description);
@@ -223,15 +239,16 @@ impl From<TaskStatus> for &'static str {
     }
 }
 
-impl From<&str> for TaskStatus {
-    fn from(value: &str) -> Self {
-        match value {
-            "Pending" => TaskStatus::Pending,
-            "InProgress" => TaskStatus::InProgress,
-            "Blocked" => TaskStatus::Blocked,
-            "Completed" => TaskStatus::Completed,
-            "Archived" => TaskStatus::Archived,
-            _ => TaskStatus::Pending,
+impl TryFrom<&str> for TaskStatus {
+    type Error = TypeConstraintError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.trim().to_lowercase().as_str() {
+            "pending" => Ok(TaskStatus::Pending),
+            "inprogress" => Ok(TaskStatus::InProgress),
+            "blocked" => Ok(TaskStatus::Blocked),
+            "completed" => Ok(TaskStatus::Completed),
+            "archived" => Ok(TaskStatus::Archived),
+            _ => Err(TypeConstraintError::InvalidTaskStatus),
         }
     }
 }
@@ -250,7 +267,7 @@ pub struct TaskListFilters {
     /// Optional filter to restrict results to a priority level.
     pub priority: Option<TaskPriority>,
     /// Optional search term matching task titles or descriptions.
-    pub search: Option<SearchTerm>,
+    pub search: Option<String>,
     /// Only return tasks due on or before this date.
     pub due_before: Option<NaiveDate>,
     /// Only return tasks due on or after this date.
@@ -312,8 +329,8 @@ impl TaskListFilters {
     }
 
     /// Apply a free-text search filter.
-    pub fn search(mut self, term: SearchTerm) -> Self {
-        self.search = Some(term);
+    pub fn search(mut self, term: impl Into<String>) -> Self {
+        self.search = Some(term.into());
         self
     }
 

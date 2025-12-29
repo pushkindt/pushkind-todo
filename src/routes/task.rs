@@ -9,7 +9,7 @@ use pushkind_common::routes::{base_context, redirect, render_template};
 use pushkind_common::zmq::ZmqSender;
 use tera::{Context, Tera};
 
-use crate::forms::task::{NewTaskCommentForm, QuickTaskStatusForm, UpdateTaskForm};
+use crate::forms::task::{QuickTaskStatusForm, TaskCommentForm, UpdateTaskForm};
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
@@ -25,7 +25,7 @@ pub async fn show_task(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
 
-    match task_service::load_task_details(repo.get_ref(), &user, task_id) {
+    match task_service::load_task_details(task_id, &user, repo.get_ref()) {
         Ok(details) => {
             let mut context = base_context(
                 &flash_messages,
@@ -52,7 +52,7 @@ pub async fn show_task(
 }
 
 /// Render the modal payload used for editing a task via AJAX.
-#[post("/task/modal/{task_id}")]
+#[post("/task/{task_id}/modal")]
 pub async fn task_modal(
     task_id: web::Path<i32>,
     user: AuthenticatedUser,
@@ -60,7 +60,7 @@ pub async fn task_modal(
     server_config: web::Data<CommonServerConfig>,
     tera: web::Data<Tera>,
 ) -> impl Responder {
-    match task_service::load_task_modal(repo.get_ref(), &user, task_id.into_inner()) {
+    match task_service::load_task_modal(task_id.into_inner(), &user, repo.get_ref()) {
         Ok(data) => {
             let mut context = Context::new();
             context.insert("task", &data.task);
@@ -86,14 +86,14 @@ pub async fn task_modal(
 #[post("/task/{task_id}/update")]
 pub async fn update_task(
     task_id: web::Path<i32>,
+    web::Form(form): web::Form<UpdateTaskForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
     zmq_sender: web::Data<Arc<ZmqSender>>,
-    web::Form(form): web::Form<UpdateTaskForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_sender = zmq_sender.get_ref().as_ref();
-    match task_service::update_task(repo.get_ref(), zmq_sender, &user, task_id, form) {
+    match task_service::update_task(task_id, form, &user, repo.get_ref(), zmq_sender) {
         Ok(updated_task) => {
             FlashMessage::success("Задача обновлена.").send();
             redirect(&format!("/task/{}", updated_task.id))
@@ -122,23 +122,15 @@ pub async fn update_task(
 #[post("/task/{task_id}/status")]
 pub async fn quick_update_task_status(
     task_id: web::Path<i32>,
+    web::Form(form): web::Form<QuickTaskStatusForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
     zmq_sender: web::Data<Arc<ZmqSender>>,
-    web::Form(form): web::Form<QuickTaskStatusForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_sender = zmq_sender.get_ref().as_ref();
 
-    match task_service::transition_task_status(
-        repo.get_ref(),
-        zmq_sender,
-        &user,
-        task_id,
-        form.status,
-        form.comment,
-        form.assign_self,
-    ) {
+    match task_service::transition_task_status(task_id, form, &user, repo.get_ref(), zmq_sender) {
         Ok(_) => {
             FlashMessage::success("Статус задачи обновлён.").send();
             redirect(&format!("/task/{task_id}"))
@@ -167,15 +159,15 @@ pub async fn quick_update_task_status(
 #[post("/task/{task_id}/comments")]
 pub async fn add_task_comment(
     task_id: web::Path<i32>,
+    web::Form(form): web::Form<TaskCommentForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
     zmq_sender: web::Data<Arc<ZmqSender>>,
-    web::Form(form): web::Form<NewTaskCommentForm>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_sender = zmq_sender.get_ref().as_ref();
 
-    match task_service::add_task_comment(repo.get_ref(), zmq_sender, &user, task_id, form) {
+    match task_service::add_task_comment(task_id, form, &user, repo.get_ref(), zmq_sender) {
         Ok(_) => {
             FlashMessage::success("Комментарий добавлен.").send();
             redirect(&format!("/task/{}", task_id))
@@ -209,7 +201,7 @@ pub async fn delete_task(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
 
-    match task_service::delete_task(repo.get_ref(), &user, task_id) {
+    match task_service::delete_task(task_id, &user, repo.get_ref()) {
         Ok(()) => {
             FlashMessage::success("Задача удалена.").send();
             redirect("/")

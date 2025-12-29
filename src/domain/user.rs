@@ -2,7 +2,7 @@
 use pushkind_common::domain::auth::AuthenticatedUser;
 use serde::{Deserialize, Serialize};
 
-use super::types::{HubId, UserEmail, UserId, UserName};
+use super::types::{HubId, TypeConstraintError, UserEmail, UserId, UserName};
 
 /// Domain representation of a user belonging to a specific hub.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -31,6 +31,7 @@ pub struct NewUser {
 }
 
 impl NewUser {
+    /// Creates a new user payload from validated domain values.
     #[must_use]
     pub fn new(hub_id: HubId, name: UserName, email: UserEmail) -> Self {
         Self {
@@ -38,6 +39,19 @@ impl NewUser {
             name,
             email,
         }
+    }
+
+    /// Attempts to construct a new user payload from raw input values.
+    pub fn try_new<N, E>(hub_id: i32, name: N, email: E) -> Result<Self, TypeConstraintError>
+    where
+        N: Into<String>,
+        E: Into<String>,
+    {
+        let hub_id = HubId::new(hub_id)?;
+        let name = UserName::new(name)?;
+        let email = UserEmail::new(email)?;
+
+        Ok(Self::new(hub_id, name, email))
     }
 }
 
@@ -49,13 +63,9 @@ pub struct UpdateUser {
 }
 
 impl TryFrom<&AuthenticatedUser> for NewUser {
-    type Error = super::types::TypeConstraintError;
+    type Error = TypeConstraintError;
 
     fn try_from(value: &AuthenticatedUser) -> Result<Self, Self::Error> {
-        let hub_id = HubId::new(value.hub_id)?;
-        let name = UserName::new(&value.name)?;
-        let email = UserEmail::new(&value.email)?;
-
-        Ok(NewUser::new(hub_id, name, email))
+        NewUser::try_new(value.hub_id, &value.name, &value.email)
     }
 }

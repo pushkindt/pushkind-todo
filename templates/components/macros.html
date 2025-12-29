@@ -99,6 +99,10 @@
         Срок
     {% elif key == 'completed_at' %}
         Завершение
+    {% elif key == 'priority' %}
+        Приоритет
+    {% elif key == 'track' %}
+        Трек
     {% else %}
         {{ key | replace(from="_", to=" ") | capitalize }}
     {% endif %}
@@ -201,7 +205,7 @@
     {% if type_key == "comment" %}
         {% set event_label = "Комментарий" %}
         {% set event_class = "badge text-bg-info" %}
-        {% elif type_key == "statuschanged" %}
+    {% elif type_key == "statuschanged" %}
         {% set event_label = "Изменение статуса" %}
         {% set event_class = "badge text-bg-primary" %}
     {% elif type_key == "assignmentchanged" %}
@@ -264,11 +268,19 @@
                         <div class="fw-semibold">{{ macros::metadata_label(key=key) }}</div>
                         <div class="text-muted small">Было</div>
                         <div class="mb-1">
-                            {{ macros::metadata_value(key=key, value=previous) }}
+                            {% if key == "priority" %}
+                                {{ macros::task_priority(value=previous) }}
+                            {% else %}
+                                {{ macros::metadata_value(key=key, value=previous) }}
+                            {% endif %}
                         </div>
                         <div class="text-muted small">Стало</div>
                         <div>
-                            {{ macros::metadata_value(key=key, value=current) }}
+                            {% if key == "priority" %}
+                                {{ macros::task_priority(value=current) }}
+                            {% else %}
+                                {{ macros::metadata_value(key=key, value=current) }}
+                            {% endif %}
                         </div>
                     </div>
                 {% else %}

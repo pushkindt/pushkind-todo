@@ -7,12 +7,11 @@ use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::NewEmail;
 use std::collections::HashMap;
 
-use validator::Validate;
-
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
-use crate::domain::user::User;
-use crate::forms::main::{AddTaskForm, UploadTasksForm, build_new_task_payload};
+use crate::domain::types::{HubId, TaskTrack, UserId};
+use crate::domain::user::{NewUser, User};
+use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
 use crate::repository::{
     TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
@@ -23,9 +22,9 @@ use crate::dto::main::{IndexPageData, IndexPageFilters, IndexQuery, IndexTask};
 
 /// Loads the tasks list for the main index page.
 pub fn load_index_page<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
     query: IndexQuery,
+    user: &AuthenticatedUser,
+    repo: &R,
 ) -> ServiceResult<IndexPageData>
 where
     R: TaskReader + UserReader + UserWriter + ?Sized,
@@ -44,81 +43,80 @@ where
     } = query;
 
     let page = page.unwrap_or(1);
-    let mut list_query = TaskListQuery::new(user.hub_id)
-        .map_err(ServiceError::from)?
-        .paginate(page, DEFAULT_ITEMS_PER_PAGE);
+
+    let hub_id = HubId::new(user.hub_id)?;
+
+    let mut list_query = TaskListQuery::new(hub_id).paginate(page, DEFAULT_ITEMS_PER_PAGE);
     list_query.filters_mut().hide_terminal_statuses = true;
 
-    let mut status_filter_text = None;
-    if let Some(status_value) = status.as_deref().and_then(parse_status_filter) {
+    let mut status_filter = None;
+    if let Some(status_value) = status
+        .as_deref()
+        .and_then(|value| TaskStatus::try_from(value).ok())
+    {
         list_query.filters_mut().status = Some(status_value);
         list_query.filters_mut().hide_terminal_statuses = false;
-        status_filter_text = Some((<&str>::from(status_value)).to_string());
+        status_filter = Some(status_value);
     }
 
-    let track_filter_text = track
-        .as_ref()
+    let mut track_filter = None;
+    if let Some(track_value) = track
+        .as_deref()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .map(|value| value.to_string());
-    if let Some(track_value) = track_filter_text.as_ref()
-        && let Ok(track) = crate::domain::types::TaskTrack::new(track_value)
+        && let Ok(track) = TaskTrack::new(track_value)
     {
-        list_query.filters_mut().track = Some(track);
+        list_query.filters_mut().track = Some(track.clone());
+        track_filter = Some(track);
     }
 
-    let mut priority_filter_text = None;
-    if let Some(priority_value) = priority.as_deref().and_then(parse_priority_filter) {
+    let mut priority_filter = None;
+    if let Some(priority_value) = priority
+        .as_deref()
+        .and_then(|value| TaskPriority::try_from(value).ok())
+    {
         list_query.filters_mut().priority = Some(priority_value);
-        priority_filter_text = Some((<&str>::from(priority_value)).to_string());
+        priority_filter = Some(priority_value);
     }
 
-    let assignee_filter_text = assignee
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string());
-    if let Some(value) = assignee_filter_text.as_deref()
-        && let Some(assignee_id) = parse_assignee_filter(value)
-        && let Ok(user_id) = crate::domain::types::UserId::new(assignee_id)
+    let mut assignee_filter = None;
+    if let Some(assignee_id) = assignee
+        && let Ok(user_id) = UserId::new(assignee_id)
     {
         list_query.filters_mut().assignee_id = Some(user_id);
+        assignee_filter = Some(user_id);
     }
 
-    let mut updated_after_text = None;
+    let mut updated_after_filter = None;
     if let Some(updated_after_value) = updated_after.as_deref().and_then(parse_date_filter)
         && let Some(timestamp) = start_of_day(updated_after_value)
     {
         list_query.filters_mut().updated_after = Some(timestamp);
-        updated_after_text = Some(updated_after_value.format("%Y-%m-%d").to_string());
+        updated_after_filter = Some(updated_after_value);
     }
 
-    let mut updated_before_text = None;
+    let mut updated_before_filter = None;
     if let Some(updated_before_value) = updated_before.as_deref().and_then(parse_date_filter)
         && let Some(timestamp) = end_of_day(updated_before_value)
     {
         list_query.filters_mut().updated_before = Some(timestamp);
-        updated_before_text = Some(updated_before_value.format("%Y-%m-%d").to_string());
+        updated_before_filter = Some(updated_before_value);
     }
 
-    if let Some(value) = search.as_ref()
-        && !value.trim().is_empty()
-        && let Ok(search_term) = crate::domain::types::SearchTerm::new(value)
+    if let Some(value) = search.as_ref().map(|s| s.trim())
+        && !value.is_empty()
     {
-        list_query.filters_mut().search = Some(search_term);
+        list_query.filters_mut().search = Some(value.to_string());
     }
 
-    let new_user: crate::domain::user::NewUser =
-        user.try_into().map_err(|_| ServiceError::Internal)?;
+    let new_user: NewUser = user.try_into()?;
     let user = repo.create_or_update_user(&new_user)?;
     let visited_at = user.visited_at;
 
-    repo.touch_visited_at(user.id.get(), user.hub_id.get())?;
+    repo.touch_visited_at(user.id, user.hub_id)?;
 
-    let (total, tasks) = repo.list_tasks(list_query).map_err(ServiceError::from)?;
-    let (_, users) = repo
-        .list_users(UserListQuery::new(user.hub_id.get()))
-        .map_err(ServiceError::from)?;
+    let (total, tasks) = repo.list_tasks(list_query)?;
+    let (_, users) = repo.list_users(UserListQuery::new(user.hub_id))?;
 
     let users_by_id = users
         .iter()
@@ -131,7 +129,7 @@ where
             tasks
                 .iter()
                 .filter(|task| task.updated_at > visited)
-                .map(|task| task.id.get())
+                .map(|task| task.id)
                 .collect()
         })
         .unwrap_or_default();
@@ -150,15 +148,15 @@ where
 
     let filters = IndexPageFilters {
         search,
-        status: status_filter_text,
-        track: track_filter_text,
-        assignee: assignee_filter_text,
-        priority: priority_filter_text,
-        updated_after: updated_after_text,
-        updated_before: updated_before_text,
+        status: status_filter,
+        track: track_filter,
+        assignee: assignee_filter,
+        priority: priority_filter,
+        updated_after: updated_after_filter,
+        updated_before: updated_before_filter,
     };
 
-    let tracks = repo.list_task_tracks(user.hub_id.get())?;
+    let tracks = repo.list_task_tracks(user.hub_id)?;
 
     Ok(IndexPageData {
         tasks,
@@ -167,42 +165,6 @@ where
         recently_updated_task_ids,
         tracks,
     })
-}
-
-/// Normalize a free-form status filter into a canonical `TaskStatus`.
-fn parse_status_filter(input: &str) -> Option<TaskStatus> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let status = TaskStatus::from(trimmed);
-    let status_text: &str = <&str>::from(status);
-
-    (status_text == trimmed).then_some(status)
-}
-
-/// Normalize a priority filter string into `TaskPriority`.
-fn parse_priority_filter(input: &str) -> Option<TaskPriority> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let priority = TaskPriority::from(trimmed);
-    let priority_text: &str = <&str>::from(priority);
-
-    (priority_text == trimmed).then_some(priority)
-}
-
-/// Parse an assignee identifier from text input.
-fn parse_assignee_filter(input: &str) -> Option<i32> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    trimmed.parse::<i32>().ok()
 }
 
 /// Parse a `YYYY-MM-DD` date filter into a NaiveDate.
@@ -228,10 +190,10 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 
 /// Validates the add-task form and persists a new task record.
 pub fn add_task<R, Z>(
+    form: AddTaskForm,
+    user: &AuthenticatedUser,
     repo: &R,
     zmq_sender: &Z,
-    user: &AuthenticatedUser,
-    form: AddTaskForm,
 ) -> ServiceResult<Task>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
@@ -239,51 +201,18 @@ where
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    if let Err(err) = form.validate() {
-        log::error!("Failed to validate form: {err}");
-        return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
-    }
-
-    let new_user: crate::domain::user::NewUser =
-        user.try_into().map_err(|_| ServiceError::Internal)?;
+    let hub_id = HubId::new(user.hub_id)?;
+    let new_user: NewUser = user.try_into()?;
     let author = repo.create_or_update_user(&new_user)?;
 
-    let AddTaskForm {
-        title,
-        message,
-        track,
-        priority,
-        assignee,
-    } = form;
+    let payload = AddTaskPayload::try_from(form)?;
+    let assignee_selection = payload.assignee.clone();
 
-    let title = match title {
-        Some(value) => value,
-        None => {
-            log::error!("Validated task form missing title value");
-            return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
-        }
-    };
+    let mut new_task = payload.into_domain(author.id, hub_id)?;
 
-    let priority = AddTaskForm::parse_priority(priority);
-
-    let mut new_task = build_new_task_payload(
-        user.hub_id,
-        author.id.get(),
-        title,
-        message,
-        track,
-        priority,
-    )
-    .map_err(|err| {
-        log::error!("Failed to build task payload: {err}");
-        ServiceError::Form("Ошибка валидации формы".to_string())
-    })?;
-
-    let assignee_user = match assignee.into_selection() {
+    let assignee_user = match assignee_selection {
         Some(selection) => {
-            let new_user = selection
-                .into_new_user(user.hub_id)
-                .map_err(|_| ServiceError::Internal)?;
+            let new_user = selection.into_domain(hub_id)?;
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -293,10 +222,7 @@ where
         new_task = new_task.assign_to(assignee.id);
     }
 
-    let created = repo.create_task(&new_task).map_err(|err| {
-        log::error!("Failed to add a task: {err}");
-        err
-    })?;
+    let created = repo.create_task(&new_task)?;
 
     if let Some(assignee) = assignee_user.as_ref() {
         match build_task_created_email(&created, &author, assignee, user) {
@@ -312,27 +238,29 @@ where
         }
     }
 
-    repo.touch_visited_at(author.id.get(), author.hub_id.get())?;
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     Ok(created)
 }
 
 /// Parses the uploaded CSV file and creates task records in bulk.
 pub fn upload_tasks<R>(
-    repo: &R,
+    form: UploadTasksForm,
     user: &AuthenticatedUser,
-    form: &mut UploadTasksForm,
+    repo: &R,
 ) -> ServiceResult<usize>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    let new_user: crate::domain::user::NewUser =
-        user.try_into().map_err(|_| ServiceError::Internal)?;
+    let mut form = form;
+
+    let hub_id = HubId::new(user.hub_id)?;
+    let new_user: NewUser = user.try_into()?;
     let author = repo.create_or_update_user(&new_user)?;
 
-    let new_tasks = form.parse(user.hub_id, author.id.get()).map_err(|err| {
+    let new_tasks = form.parse(author.id, hub_id).map_err(|err| {
         log::error!("Failed to parse tasks: {err}");
         ServiceError::Form("Ошибка при парсинге задач".to_string())
     })?;
@@ -340,13 +268,10 @@ where
     let created_count = new_tasks.len();
 
     for new_task in new_tasks {
-        repo.create_task(&new_task).map_err(|err| {
-            log::error!("Failed to add a task: {err}");
-            err
-        })?;
+        repo.create_task(&new_task)?;
     }
 
-    repo.touch_visited_at(author.id.get(), author.hub_id.get())?;
+    repo.touch_visited_at(author.id, author.hub_id)?;
 
     Ok(created_count)
 }
@@ -418,8 +343,10 @@ mod tests {
         NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskPriority,
         TaskStatus, UpdateTask as DomainUpdateTask,
     };
-    use crate::domain::types::{HubId, UserEmail, UserName};
-    use crate::domain::user::User;
+    use crate::domain::types::{
+        HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserEmail, UserId, UserName,
+    };
+    use crate::domain::user::{UpdateUser, User};
     use crate::forms::task::AssigneeSelectionForm;
     use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
     use crate::repository::{TaskWriter, UserListQuery, UserReader, UserWriter};
@@ -436,7 +363,6 @@ mod tests {
     }
 
     fn sample_task(id: i32, hub_id: i32, title: &str) -> Task {
-        use crate::domain::types::{HubId, TaskId, TaskTitle, UserId};
         Task {
             id: TaskId::new(id).unwrap(),
             hub_id: HubId::new(hub_id).unwrap(),
@@ -466,7 +392,6 @@ mod tests {
     }
 
     fn sample_user_record(id: i32, hub_id: i32, email: &str, name: &str) -> User {
-        use crate::domain::types::{HubId, UserEmail, UserId, UserName};
         User {
             id: UserId::new(id).unwrap(),
             hub_id: HubId::new(hub_id).unwrap(),
@@ -529,8 +454,8 @@ mod tests {
     impl TaskReader for TaskReaderUserRepo {
         fn get_task_by_id(
             &self,
-            id: i32,
-            hub_id: i32,
+            id: TaskId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Option<Task>> {
             self.task_reader.get_task_by_id(id, hub_id)
         }
@@ -544,8 +469,8 @@ mod tests {
 
         fn list_assignments_for_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Vec<DomainTaskAssignment>>
         {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
@@ -553,8 +478,8 @@ mod tests {
 
         fn list_task_tracks(
             &self,
-            hub_id: i32,
-        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<String>> {
+            hub_id: HubId,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<TaskTrack>> {
             self.task_reader.list_task_tracks(hub_id)
         }
     }
@@ -562,16 +487,16 @@ mod tests {
     impl UserReader for TaskReaderUserRepo {
         fn get_user_by_id(
             &self,
-            id: i32,
-            hub_id: i32,
+            id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_id(id, hub_id)
         }
 
         fn get_user_by_email(
             &self,
-            email: &str,
-            hub_id: i32,
+            email: &UserEmail,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_email(email, hub_id)
         }
@@ -587,32 +512,32 @@ mod tests {
     impl UserWriter for TaskReaderUserRepo {
         fn create_or_update_user(
             &self,
-            new_user: &crate::domain::user::NewUser,
+            new_user: &NewUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
             self.user_writer.create_or_update_user(new_user)
         }
 
         fn update_user(
             &self,
-            user_id: i32,
-            hub_id: i32,
-            updates: &crate::domain::user::UpdateUser,
+            user_id: UserId,
+            hub_id: HubId,
+            updates: &UpdateUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
             self.user_writer.update_user(user_id, hub_id, updates)
         }
 
         fn delete_user(
             &self,
-            user_id: i32,
-            hub_id: i32,
+            user_id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.delete_user(user_id, hub_id)
         }
 
         fn touch_visited_at(
             &self,
-            user_id: i32,
-            hub_id: i32,
+            user_id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.touch_visited_at(user_id, hub_id)
         }
@@ -644,8 +569,8 @@ mod tests {
 
         fn update_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
             updates: &DomainUpdateTask,
         ) -> pushkind_common::repository::errors::RepositoryResult<Task> {
             self.task_writer.update_task(task_id, hub_id, updates)
@@ -653,8 +578,8 @@ mod tests {
 
         fn delete_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.task_writer.delete_task(task_id, hub_id)
         }
@@ -668,9 +593,9 @@ mod tests {
 
         fn remove_assignment(
             &self,
-            task_id: i32,
-            hub_id: i32,
-            assignee_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
+            assignee_id: UserId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.task_writer
                 .remove_assignment(task_id, hub_id, assignee_id)
@@ -680,16 +605,16 @@ mod tests {
     impl UserReader for TaskWriterUserRepo {
         fn get_user_by_id(
             &self,
-            id: i32,
-            hub_id: i32,
+            id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_id(id, hub_id)
         }
 
         fn get_user_by_email(
             &self,
-            email: &str,
-            hub_id: i32,
+            email: &UserEmail,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_email(email, hub_id)
         }
@@ -705,32 +630,32 @@ mod tests {
     impl UserWriter for TaskWriterUserRepo {
         fn create_or_update_user(
             &self,
-            new_user: &crate::domain::user::NewUser,
+            new_user: &NewUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
             self.user_writer.create_or_update_user(new_user)
         }
 
         fn update_user(
             &self,
-            user_id: i32,
-            hub_id: i32,
-            updates: &crate::domain::user::UpdateUser,
+            user_id: UserId,
+            hub_id: HubId,
+            updates: &UpdateUser,
         ) -> pushkind_common::repository::errors::RepositoryResult<User> {
             self.user_writer.update_user(user_id, hub_id, updates)
         }
 
         fn delete_user(
             &self,
-            user_id: i32,
-            hub_id: i32,
+            user_id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.delete_user(user_id, hub_id)
         }
 
         fn touch_visited_at(
             &self,
-            user_id: i32,
-            hub_id: i32,
+            user_id: UserId,
+            hub_id: HubId,
         ) -> pushkind_common::repository::errors::RepositoryResult<()> {
             self.user_writer.touch_visited_at(user_id, hub_id)
         }
@@ -768,7 +693,7 @@ mod tests {
         let repo = TaskReaderUserRepo::new();
         let user = user_with_roles(&[]);
 
-        let result = load_index_page(&repo, &user, IndexQuery::default());
+        let result = load_index_page(IndexQuery::default(), &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -789,7 +714,10 @@ mod tests {
         let expected_email = user.email.clone();
         let expected_name = user.name.clone();
         let expected_user = sample_user_record(5, expected_hub, &expected_email, &expected_name);
-        let expected_tracks = vec!["Activation".to_string(), "Retention".to_string()];
+        let expected_tracks = vec![
+            TaskTrack::new("Activation".to_string()).unwrap(),
+            TaskTrack::new("Retention".to_string()).unwrap(),
+        ];
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -800,11 +728,8 @@ mod tests {
                 let expected_name = expected_name.clone();
                 let expected_user = expected_user.clone();
                 move |new_user| {
-                    use crate::domain::types::HubId;
                     assert_eq!(new_user.hub_id, HubId::new(expected_hub_id).unwrap());
-                    use crate::domain::types::UserEmail;
                     assert_eq!(new_user.email, UserEmail::new(&expected_email).unwrap());
-                    use crate::domain::types::UserName;
                     assert_eq!(new_user.name, UserName::new(&expected_name).unwrap());
                     Ok(expected_user.clone())
                 }
@@ -816,8 +741,8 @@ mod tests {
             .returning({
                 let expected_user = expected_user.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, expected_user.id.get());
-                    assert_eq!(hub_id, expected_user.hub_id.get());
+                    assert_eq!(user_id, expected_user.id);
+                    assert_eq!(hub_id, expected_user.hub_id);
                     Ok(())
                 }
             });
@@ -826,7 +751,7 @@ mod tests {
             .expect_list_users()
             .times(1)
             .withf(move |query| {
-                query.hub_id == hub_for_assert
+                query.hub_id == HubId::new(hub_for_assert).unwrap()
                     && query.pagination.is_none()
                     && query.search.is_none()
             })
@@ -836,12 +761,8 @@ mod tests {
             .expect_list_tasks()
             .times(1)
             .withf(move |query| {
-                use crate::domain::types::HubId;
                 assert_eq!(query.filters.hub_id, HubId::new(hub_for_assert).unwrap());
-                assert_eq!(
-                    query.filters.search.as_ref().map(|s| s.as_str()),
-                    Some("alp")
-                );
+                assert_eq!(query.filters.search.as_deref(), Some("alp"));
                 assert!(query.filters.hide_terminal_statuses);
                 assert!(query.filters.track.is_none());
                 assert!(query.filters.priority.is_none());
@@ -872,12 +793,12 @@ mod tests {
                 let hub_for_tracks = expected_hub;
                 let tracks_for_return = expected_tracks.clone();
                 move |hub_id| {
-                    assert_eq!(hub_id, hub_for_tracks);
+                    assert_eq!(hub_id, HubId::new(hub_for_tracks).unwrap());
                     Ok(tracks_for_return.clone())
                 }
             });
 
-        let result = load_index_page(&repo, &user, query);
+        let result = load_index_page(query, &user, &repo);
 
         let data = match result {
             Ok(value) => value,
@@ -930,7 +851,7 @@ mod tests {
             page: Some(1),
             status: Some("Completed".to_string()),
             track: Some("Activation".to_string()),
-            assignee: Some("24".to_string()),
+            assignee: Some(24),
             priority: Some("High".to_string()),
             updated_after: Some("2024-05-01".to_string()),
             updated_before: Some("2024-05-31".to_string()),
@@ -949,7 +870,7 @@ mod tests {
         );
         let assignee_user =
             sample_user_record(24, expected_hub_id, "owner@example.com", "Task Owner");
-        let expected_tracks = vec!["Activation".to_string()];
+        let expected_tracks = vec![TaskTrack::new("Activation".to_string()).unwrap()];
 
         repo.user_writer
             .expect_create_or_update_user()
@@ -972,8 +893,8 @@ mod tests {
             .returning({
                 let expected_user = expected_user.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, expected_user.id.get());
-                    assert_eq!(hub_id, expected_user.hub_id.get());
+                    assert_eq!(user_id, expected_user.id);
+                    assert_eq!(hub_id, expected_user.hub_id);
                     Ok(())
                 }
             });
@@ -982,7 +903,7 @@ mod tests {
             .expect_list_users()
             .times(1)
             .withf(move |query| {
-                query.hub_id == expected_hub_id
+                query.hub_id == HubId::new(expected_hub_id).unwrap()
                     && query.pagination.is_none()
                     && query.search.is_none()
             })
@@ -1011,17 +932,14 @@ mod tests {
                 } = query;
 
                 assert_eq!(filters.hub_id, HubId::new(expected_hub_id).unwrap());
-                assert_eq!(
-                    filters.search.as_ref().map(|term| term.as_str()),
-                    Some("project")
-                );
+                assert_eq!(filters.search.as_deref(), Some("project"));
                 assert_eq!(filters.status, Some(TaskStatus::Completed));
                 assert_eq!(
                     filters.track.as_ref().map(|track| track.as_str()),
                     Some("Activation")
                 );
                 assert_eq!(filters.priority, Some(TaskPriority::High));
-                assert_eq!(filters.assignee_id.map(|id| id.get()), Some(24));
+                assert_eq!(filters.assignee_id, Some(UserId::new(24).unwrap()));
                 assert_eq!(filters.updated_after, Some(expected_after_ts));
                 assert_eq!(filters.updated_before, Some(expected_before_ts));
                 assert!(!filters.hide_terminal_statuses);
@@ -1043,20 +961,23 @@ mod tests {
             .returning({
                 let expected_tracks = expected_tracks.clone();
                 move |hub_id| {
-                    assert_eq!(hub_id, expected_hub_id);
+                    assert_eq!(hub_id, HubId::new(expected_hub_id).unwrap());
                     Ok(expected_tracks.clone())
                 }
             });
 
-        let result = load_index_page(&repo, &user, query).expect("expected success");
-        assert_eq!(result.filters.status.as_deref(), Some("Completed"));
-        assert_eq!(result.filters.track.as_deref(), Some("Activation"));
-        assert_eq!(result.filters.assignee.as_deref(), Some("24"));
-        assert_eq!(result.filters.priority.as_deref(), Some("High"));
-        assert_eq!(result.filters.updated_after.as_deref(), Some("2024-05-01"));
-        assert_eq!(result.filters.updated_before.as_deref(), Some("2024-05-31"));
+        let result = load_index_page(query, &user, &repo).expect("expected success");
+        assert_eq!(result.filters.status, Some(TaskStatus::Completed));
+        assert_eq!(
+            result.filters.track,
+            Some(TaskTrack::new("Activation".to_string()).unwrap())
+        );
+        assert_eq!(result.filters.assignee, Some(UserId::new(24).unwrap()));
+        assert_eq!(result.filters.priority, Some(TaskPriority::High));
+        assert_eq!(result.filters.updated_after, Some(expected_after_date));
+        assert_eq!(result.filters.updated_before, Some(expected_before_date));
         assert_eq!(result.users.len(), 2);
-        assert_eq!(result.users[1].id.get(), 24);
+        assert_eq!(result.users[1].id, UserId::new(24).unwrap());
         assert_eq!(result.tracks, expected_tracks);
     }
 
@@ -1102,8 +1023,8 @@ mod tests {
             .returning({
                 let user_record = user_record.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, user_record.id.get());
-                    assert_eq!(hub_id, user_record.hub_id.get());
+                    assert_eq!(user_id, user_record.id);
+                    assert_eq!(hub_id, user_record.hub_id);
                     Ok(())
                 }
             });
@@ -1112,13 +1033,13 @@ mod tests {
             .expect_list_users()
             .times(1)
             .withf(move |query| {
-                query.hub_id == expected_hub_id
+                query.hub_id == HubId::new(expected_hub_id).unwrap()
                     && query.pagination.is_none()
                     && query.search.is_none()
             })
             .returning(|_| Ok((0, Vec::new())));
 
-        let fresh_task_id = 2;
+        let fresh_task_id = TaskId::new(2).unwrap();
         let hub_id_for_tasks = user.hub_id;
 
         repo.task_reader.expect_list_tasks().times(1).returning({
@@ -1127,7 +1048,7 @@ mod tests {
                 let mut stale_task = sample_task(1, hub_id_for_tasks, "stale");
                 stale_task.updated_at = visited_at_for_tasks;
 
-                let mut fresh_task = sample_task(fresh_task_id, hub_id_for_tasks, "fresh");
+                let mut fresh_task = sample_task(fresh_task_id.get(), hub_id_for_tasks, "fresh");
                 fresh_task.updated_at = visited_at_for_tasks + Duration::hours(1);
 
                 Ok((2, vec![stale_task, fresh_task]))
@@ -1139,12 +1060,12 @@ mod tests {
             .times(1)
             .returning({
                 move |hub_id| {
-                    assert_eq!(hub_id, expected_hub_id);
+                    assert_eq!(hub_id, HubId::new(expected_hub_id).unwrap());
                     Ok(Vec::new())
                 }
             });
 
-        let result = load_index_page(&repo, &user, query).expect("expected success");
+        let result = load_index_page(query, &user, &repo).expect("expected success");
 
         assert!(result.users.is_empty());
         assert_eq!(result.recently_updated_task_ids, vec![fresh_task_id]);
@@ -1157,36 +1078,48 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[]);
         let form = AddTaskForm {
-            title: Some("alpha".to_string()),
+            title: "alpha".to_string(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: assignee_selection_form_none(),
         };
 
-        let result = add_task(&repo, &zmq, &user, form);
+        let result = add_task(form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
 
     #[test]
     fn add_task_returns_form_error_on_validation_failure() {
-        let repo = TaskWriterUserRepo::new();
+        let mut repo = TaskWriterUserRepo::new();
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
-            title: Some(String::new()),
+            title: String::new(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: assignee_selection_form_none(),
         };
 
-        let result = add_task(&repo, &zmq, &user, form);
+        let expected_hub = user.hub_id;
+        let expected_email = user.email.to_lowercase();
+        let expected_name = user.name.clone();
+        let author = sample_user_record(7, expected_hub, &expected_email, &expected_name);
+
+        repo.user_writer
+            .expect_create_or_update_user()
+            .times(1)
+            .return_once(move |_| Ok(author));
+        repo.user_writer.expect_touch_visited_at().never();
+        repo.task_writer.expect_create_task().never();
+
+        let result = add_task(form, &user, &repo, &zmq);
 
         match result {
             Err(ServiceError::Form(message)) => {
-                assert_eq!(message, "Ошибка валидации формы");
+                assert!(message.starts_with("validation errors:"));
             }
             other => panic!("expected form error, got {other:?}"),
         }
@@ -1198,10 +1131,10 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
-            title: Some("alpha".to_string()),
+            title: "alpha".to_string(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: assignee_selection_form_none(),
         };
 
@@ -1233,8 +1166,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id.get());
-                assert_eq!(hub_id, expected_hub_id.get());
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub_id);
                 Ok(())
             });
 
@@ -1253,7 +1186,7 @@ mod tests {
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
-        let result = add_task(&repo, &zmq, &user, form);
+        let result = add_task(form, &user, &repo, &zmq);
 
         let created = match result {
             Ok(value) => value,
@@ -1271,10 +1204,10 @@ mod tests {
         let assignee_email = "assignee@example.com".to_string();
         let assignee_name = "Assigned User".to_string();
         let form = AddTaskForm {
-            title: Some("alpha".to_string()),
+            title: "alpha".to_string(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: AssigneeSelectionForm {
                 email: Some(assignee_email.clone()),
                 name: Some(assignee_name.clone()),
@@ -1327,8 +1260,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id.get());
-                assert_eq!(hub_id, expected_hub_id.get());
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub_id);
                 Ok(())
             });
 
@@ -1357,7 +1290,7 @@ mod tests {
             });
 
         let zmq = MockZmqSender {};
-        let result = add_task(&repo, &zmq, &user, form);
+        let result = add_task(form, &user, &repo, &zmq);
 
         let created = match result {
             Ok(value) => value,
@@ -1377,10 +1310,10 @@ mod tests {
         let assignee_name = "Assigned User".to_string();
 
         let form = AddTaskForm {
-            title: Some("New Task".to_string()),
+            title: "New Task".to_string(),
             message: Some("Task details".to_string()),
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: AssigneeSelectionForm {
                 email: Some(assignee_email.clone()),
                 name: Some(assignee_name.clone()),
@@ -1423,17 +1356,17 @@ mod tests {
             .returning({
                 let author_record = author_record.clone();
                 move |user_id, hub_id| {
-                    assert_eq!(user_id, author_record.id.get());
-                    assert_eq!(hub_id, author_record.hub_id.get());
+                    assert_eq!(user_id, author_record.id);
+                    assert_eq!(hub_id, author_record.hub_id);
                     Ok(())
                 }
             });
 
         let created_task = Task {
-            id: crate::domain::types::TaskId::new(51).unwrap(),
+            id: TaskId::new(51).unwrap(),
             hub_id: HubId::new(expected_hub).unwrap(),
-            title: crate::domain::types::TaskTitle::new("New Task").unwrap(),
-            description: Some(crate::domain::types::TaskDescription::from("Task details")),
+            title: TaskTitle::new("New Task").unwrap(),
+            description: Some(TaskDescription::new("Task details").unwrap()),
             track: None,
             priority: TaskPriority::Middle,
             status: TaskStatus::Pending,
@@ -1457,7 +1390,7 @@ mod tests {
             }
         });
 
-        let outcome = add_task(&repo, &zmq, &user, form).expect("should create task");
+        let outcome = add_task(form, &user, &repo, &zmq).expect("should create task");
 
         assert_eq!(outcome.id, created_task.id);
 
@@ -1471,7 +1404,10 @@ mod tests {
             ZMQSendEmailMessage::NewEmail(message) => {
                 let (actor, email) = *message;
                 assert_eq!(actor.email, user.email);
-                assert_eq!(email.hub_id.get(), user.hub_id);
+                assert_eq!(
+                    email.hub_id,
+                    pushkind_emailer::domain::types::HubId::new(user.hub_id).unwrap()
+                );
                 assert_eq!(email.recipients.len(), 1);
 
                 let recipient = &email.recipients[0];
@@ -1504,10 +1440,10 @@ mod tests {
         let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
-            title: Some("alpha".to_string()),
+            title: "alpha".to_string(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: assignee_selection_form_none(),
         };
 
@@ -1539,8 +1475,8 @@ mod tests {
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, author_id.get());
-                assert_eq!(hub_id, expected_hub_id.get());
+                assert_eq!(user_id, author_id);
+                assert_eq!(hub_id, expected_hub_id);
                 Ok(())
             });
 
@@ -1555,7 +1491,7 @@ mod tests {
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
         let zmq = MockZmqSender {};
-        let result = add_task(&repo, &zmq, &user, form);
+        let result = add_task(form, &user, &repo, &zmq);
 
         assert!(result.is_ok(), "expected task creation to succeed");
     }
@@ -1566,10 +1502,10 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let form = AddTaskForm {
-            title: Some("alpha".to_string()),
+            title: "alpha".to_string(),
             message: None,
             track: None,
-            priority: None,
+            priority: "Middle".to_string(),
             assignee: assignee_selection_form_none(),
         };
 
@@ -1608,7 +1544,7 @@ mod tests {
             })
             .returning(|_| Err(RepositoryError::Unexpected("db write failed".to_string())));
 
-        let result = add_task(&repo, &zmq, &user, form);
+        let result = add_task(form, &user, &repo, &zmq);
 
         match result {
             Err(ServiceError::Repository(RepositoryError::Unexpected(message))) => {
@@ -1622,13 +1558,13 @@ mod tests {
     fn upload_tasks_returns_unauthorized_when_role_missing() {
         let repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[]);
-        let mut form = upload_form(
+        let form = upload_form(
             "title
 alpha
 ",
         );
 
-        let result = upload_tasks(&repo, &user, &mut form);
+        let result = upload_tasks(form, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1637,7 +1573,7 @@ alpha
     fn upload_tasks_returns_form_error_when_parse_fails() {
         let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
-        let mut form = upload_form(
+        let form = upload_form(
             "title
 foo,bar
 ",
@@ -1669,7 +1605,7 @@ foo,bar
 
         repo.task_writer.expect_create_task().never();
 
-        let result = upload_tasks(&repo, &user, &mut form);
+        let result = upload_tasks(form, &user, &repo);
 
         match result {
             Err(ServiceError::Form(message)) => {
@@ -1683,7 +1619,7 @@ foo,bar
     fn upload_tasks_persists_uploaded_records() {
         let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
-        let mut form = upload_form(
+        let form = upload_form(
             "title,description
 alpha,
 beta,
@@ -1720,8 +1656,8 @@ beta,
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, expected_author_id.get());
-                assert_eq!(hub_id, expected_hub_id.get());
+                assert_eq!(user_id, expected_author_id);
+                assert_eq!(hub_id, expected_hub_id);
                 Ok(())
             });
 
@@ -1746,7 +1682,7 @@ beta,
                 Ok(sample_task(task_id, hub_for_return, task.title.as_str()))
             });
 
-        let result = upload_tasks(&repo, &user, &mut form);
+        let result = upload_tasks(form, &user, &repo);
 
         let created_count = match result {
             Ok(value) => value,
@@ -1769,7 +1705,7 @@ beta,
     fn upload_tasks_creates_author_when_missing() {
         let mut repo = TaskWriterUserRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
-        let mut form = upload_form(
+        let form = upload_form(
             "title,description
 alpha,
 ",
@@ -1803,8 +1739,8 @@ alpha,
             .expect_touch_visited_at()
             .times(1)
             .returning(move |user_id, hub_id| {
-                assert_eq!(user_id, author_id.get());
-                assert_eq!(hub_id, expected_hub_id.get());
+                assert_eq!(user_id, author_id);
+                assert_eq!(hub_id, expected_hub_id);
                 Ok(())
             });
 
@@ -1817,7 +1753,7 @@ alpha,
                 Ok(sample_task(1, hub_for_return, task.title.as_str()))
             });
 
-        let result = upload_tasks(&repo, &user, &mut form);
+        let result = upload_tasks(form, &user, &repo);
 
         assert!(
             result.is_ok(),

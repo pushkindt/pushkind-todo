@@ -16,7 +16,7 @@ pub async fn api_v1_tasks(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
 ) -> impl Responder {
-    match main_service::load_index_page(repo.get_ref(), &user, params.0) {
+    match main_service::load_index_page(params.into_inner(), &user, repo.get_ref()) {
         Ok(response) => HttpResponse::Ok().json(response.tasks),
         Err(ServiceError::Unauthorized) => HttpResponse::Unauthorized().finish(),
         Err(err) => {
