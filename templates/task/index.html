@@ -20,7 +20,7 @@
             <div class="d-flex align-items-center gap-2">
                 {{ macros::task_status(value=task.status) }}
                 <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal"
-                    data-bs-target="#modifyTaskModal" hx-post="/task/modal/{{task.id}}" hx-swap="innerHTML"
+                    data-bs-target="#modifyTaskModal" hx-post="/task/{{task.id}}/modal" hx-swap="innerHTML"
                     hx-target="#taskModalBody" title="Редактировать задачу">
                     <i class="bi bi-pencil-square"></i>
                 </button>

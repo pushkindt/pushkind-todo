@@ -4,6 +4,7 @@ use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
 use crate::{
     domain::task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEvent as DomainTaskEvent},
+    domain::types::{HubId, TaskEventId, TaskId},
     models::task_event::{
         NewTaskEvent as DbNewTaskEvent, TaskEvent as DbTaskEvent, TaskEventModelError,
     },
@@ -24,12 +25,14 @@ impl TaskEventReader for DieselRepository {
     /// Load the streams of events linked to a task, ordered by recency.
     fn list_events_for_task(
         &self,
-        task_id: i32,
-        hub_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
     ) -> RepositoryResult<Vec<DomainTaskEvent>> {
         use crate::schema::{task_events, tasks};
 
         let mut conn = self.conn()?;
+        let task_id = i32::from(task_id);
+        let hub_id = i32::from(hub_id);
 
         let db_events = task_events::table
             .inner_join(tasks::table)
@@ -44,27 +47,6 @@ impl TaskEventReader for DieselRepository {
             .map(|event| event.try_into())
             .collect::<Result<Vec<_>, _>>()
             .map_err(model_error_as_unexpected)
-    }
-
-    /// Fetch a single task event by identifier scoped to a hub.
-    fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTaskEvent>> {
-        use crate::schema::{task_events, tasks};
-
-        let mut conn = self.conn()?;
-
-        let event = task_events::table
-            .inner_join(tasks::table)
-            .filter(task_events::id.eq(id))
-            .filter(tasks::hub_id.eq(hub_id))
-            .select(DbTaskEvent::as_select())
-            .first::<DbTaskEvent>(&mut conn)
-            .optional()?;
-
-        let Some(event) = event else {
-            return Ok(None);
-        };
-
-        Ok(Some(event.try_into().map_err(model_error_as_unexpected)?))
     }
 }
 
@@ -100,10 +82,12 @@ impl TaskEventWriter for DieselRepository {
     }
 
     /// Remove a recorded task event by id, enforcing hub scope.
-    fn delete_event(&self, id: i32, hub_id: i32) -> RepositoryResult<()> {
+    fn delete_event(&self, id: TaskEventId, hub_id: HubId) -> RepositoryResult<()> {
         use crate::schema::{task_events, tasks};
 
         let mut conn = self.conn()?;
+        let id = i32::from(id);
+        let hub_id = i32::from(hub_id);
 
         conn.transaction::<(), RepositoryError, _>(|conn| {
             let exists = task_events::table

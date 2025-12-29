@@ -13,7 +13,7 @@ actix-web = "4.12.1"
 actix-web-flash-messages = { version = "0.5.0", features = ["cookies"] }
 chrono = { version = "0.4.42", features = ["serde"] }
 csv = "1.4.0"
-diesel = { version = "2.3.4", features = [
+diesel = { version = "2.3.5", features = [
     "sqlite",
     "r2d2",
     "chrono",
@@ -24,8 +24,8 @@ env_logger = "0.11.8"
 lazy_static = "1.5.0"
 log = "0.4.29"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_html_form = "0.2.8"
-serde_json = "1.0.145"
+serde_html_form = "0.3.2"
+serde_json = "1.0.147"
 tera = { version = "1.20.1", features = ["builtins"] }
 thiserror = "2.0.17"
 pushkind-common = { git = "https://github.com/pushkindt/pushkind-common.git", branch = "main", features = [
@@ -43,4 +43,4 @@ pushkind-emailer = { git = "https://github.com/pushkindt/pushkind-emailer.git", 
 [dev-dependencies]
 diesel_migrations = "2.3.1"
 mockall = "0.14.0"
-tempfile = "3.23.0"
+tempfile = "3.24.0"

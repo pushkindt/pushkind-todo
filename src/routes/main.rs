@@ -25,7 +25,7 @@ pub async fn show_index(
     server_config: web::Data<CommonServerConfig>,
     tera: web::Data<Tera>,
 ) -> impl Responder {
-    match main_service::load_index_page(repo.get_ref(), &user, params.0) {
+    match main_service::load_index_page(params.into_inner(), &user, repo.get_ref()) {
         Ok(data) => {
             let mut context = base_context(
                 &flash_messages,
@@ -61,7 +61,7 @@ pub async fn add_task(
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
     let zmq_sender = zmq_sender.get_ref().as_ref();
-    match main_service::add_task(repo.get_ref(), zmq_sender, &user, form) {
+    match main_service::add_task(form, &user, repo.get_ref(), zmq_sender) {
         Ok(_) => {
             FlashMessage::success("Задача добавлена.").send();
             redirect("/")
@@ -87,9 +87,9 @@ pub async fn add_task(
 pub async fn tasks_upload(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    MultipartForm(mut form): MultipartForm<UploadTasksForm>,
+    MultipartForm(form): MultipartForm<UploadTasksForm>,
 ) -> impl Responder {
-    match main_service::upload_tasks(repo.get_ref(), &user, &mut form) {
+    match main_service::upload_tasks(form, &user, repo.get_ref()) {
         Ok(created_count) => {
             FlashMessage::success(format!("Добавлено задач: {created_count}")).send();
             redirect("/")

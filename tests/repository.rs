@@ -7,7 +7,7 @@ use pushkind_todo::domain::task::{
 };
 use pushkind_todo::domain::task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType};
 use pushkind_todo::domain::types::{
-    HubId, SearchTerm, TaskDescription, TaskTitle, TaskTrack, UserEmail, UserName,
+    HubId, TaskDescription, TaskTitle, TaskTrack, UserEmail, UserName,
 };
 use pushkind_todo::domain::user::{NewUser as DomainNewUser, UpdateUser as DomainUpdateUser};
 use pushkind_todo::repository::DieselRepository;
@@ -45,18 +45,21 @@ fn test_user_repository_crud() {
     assert_eq!(bob.email.as_str(), "bob@example.com");
 
     let fetched_by_id = repo
-        .get_user_by_id(alice.id.get(), hub_id.get())
+        .get_user_by_id(alice.id, hub_id)
         .expect("get_user_by_id")
         .expect("alice should exist");
     assert_eq!(fetched_by_id.name.as_str(), "Alice");
 
+    let alice_email = UserEmail::new("ALICE@EXAMPLE.COM").unwrap();
     let fetched_by_email = repo
-        .get_user_by_email("ALICE@EXAMPLE.COM", hub_id.get())
+        .get_user_by_email(&alice_email, hub_id)
         .expect("get_user_by_email")
         .expect("alice by email");
     assert_eq!(fetched_by_email.id, alice.id);
 
-    let (total, mut users) = repo.list_users(UserListQuery::new(1)).expect("list users");
+    let (total, mut users) = repo
+        .list_users(UserListQuery::new(hub_id))
+        .expect("list users");
     assert_eq!(total, 2);
     assert_eq!(users.len(), 2);
     users.sort_by_key(|user| user.name.as_str().to_owned());
@@ -64,15 +67,15 @@ fn test_user_repository_crud() {
     assert_eq!(users[1].name.as_str(), "Bob");
 
     let (search_total, search_users) = repo
-        .list_users(UserListQuery::new(1).search("lice"))
+        .list_users(UserListQuery::new(hub_id).search("lice"))
         .expect("search users");
     assert_eq!(search_total, 1);
     assert_eq!(search_users.first().expect("one user").id, alice.id);
 
     let updated = repo
         .update_user(
-            alice.id.get(),
-            hub_id.get(),
+            alice.id,
+            hub_id,
             &DomainUpdateUser {
                 name: UserName::new("Alice Updated").unwrap(),
             },
@@ -82,8 +85,8 @@ fn test_user_repository_crud() {
 
     let err = repo
         .update_user(
-            alice.id.get(),
-            2,
+            alice.id,
+            HubId::new(2).unwrap(),
             &DomainUpdateUser {
                 name: UserName::new("Hacker").unwrap(),
             },
@@ -92,21 +95,20 @@ fn test_user_repository_crud() {
     assert!(matches!(err, RepositoryError::NotFound));
 
     let err = repo
-        .delete_user(alice.id.get(), 2)
+        .delete_user(alice.id, HubId::new(2).unwrap())
         .expect_err("cross-hub delete should fail");
     assert!(matches!(err, RepositoryError::NotFound));
 
-    repo.delete_user(alice.id.get(), hub_id.get())
-        .expect("delete alice");
+    repo.delete_user(alice.id, hub_id).expect("delete alice");
 
     assert!(
-        repo.get_user_by_id(alice.id.get(), hub_id.get())
+        repo.get_user_by_id(alice.id, hub_id)
             .expect("get after delete")
             .is_none()
     );
 
     let (total_after, users_after) = repo
-        .list_users(UserListQuery::new(1))
+        .list_users(UserListQuery::new(hub_id))
         .expect("list after delete");
     assert_eq!(total_after, 1);
     assert_eq!(users_after[0].id, bob.id);
@@ -148,17 +150,10 @@ fn test_task_event_repository_crud() {
         .expect("record comment event");
     assert_eq!(comment.task_id, task.id);
 
-    let fetched = repo
-        .get_event_by_id(comment.id.get(), hub_id.get())
-        .expect("fetch event by id")
-        .expect("comment should exist");
-    assert_eq!(fetched.id, comment.id);
-
-    assert!(
-        repo.get_event_by_id(comment.id.get(), 2)
-            .expect("cross hub fetch")
-            .is_none()
-    );
+    let events_for_task = repo
+        .list_events_for_task(task.id, hub_id)
+        .expect("list events after comment");
+    assert!(events_for_task.iter().any(|event| event.id == comment.id));
 
     let mut status_event = DomainNewTaskEvent::new(
         task.id,
@@ -173,33 +168,27 @@ fn test_task_event_repository_crud() {
         .expect("record status change");
 
     let events = repo
-        .list_events_for_task(task.id.get(), hub_id.get())
+        .list_events_for_task(task.id, hub_id)
         .expect("list events");
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].id, status.id);
     assert_eq!(events[1].id, comment.id);
 
     let cross_events = repo
-        .list_events_for_task(task.id.get(), 2)
+        .list_events_for_task(task.id, HubId::new(2).unwrap())
         .expect("cross hub list");
     assert!(cross_events.is_empty());
 
     let err = repo
-        .delete_event(comment.id.get(), 2)
+        .delete_event(comment.id, HubId::new(2).unwrap())
         .expect_err("cross hub delete");
     assert!(matches!(err, RepositoryError::NotFound));
 
-    repo.delete_event(comment.id.get(), hub_id.get())
+    repo.delete_event(comment.id, hub_id)
         .expect("delete comment event");
 
-    assert!(
-        repo.get_event_by_id(comment.id.get(), hub_id.get())
-            .expect("fetch after delete")
-            .is_none()
-    );
-
     let remaining = repo
-        .list_events_for_task(task.id.get(), hub_id.get())
+        .list_events_for_task(task.id, hub_id)
         .expect("list remaining events");
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].id, status.id);
@@ -231,11 +220,11 @@ fn test_task_repository_crud() {
         .expect("create assignee user");
 
     let alpha_new = DomainNewTask::new(hub_id, author.id, TaskTitle::new("Alpha Task").unwrap())
-        .description(TaskDescription::from("first task"))
+        .description(TaskDescription::new("first task").unwrap())
         .track(TaskTrack::new("Activation").unwrap())
         .due_date(due_alpha);
     let beta_new = DomainNewTask::new(hub_id, author.id, TaskTitle::new("Beta Task").unwrap())
-        .description(TaskDescription::from("second task"))
+        .description(TaskDescription::new("second task").unwrap())
         .track(TaskTrack::new("Retention").unwrap())
         .status(TaskStatus::InProgress)
         .assign_to(assignee.id)
@@ -255,54 +244,45 @@ fn test_task_repository_crud() {
     assert_eq!(beta.priority, TaskPriority::Middle);
 
     assert!(
-        repo.get_task_by_id(alpha.id.get(), 2)
+        repo.get_task_by_id(alpha.id, HubId::new(2).unwrap())
             .expect("cross hub get")
             .is_none()
     );
 
     let tracks = repo
-        .list_task_tracks(hub_id.get())
+        .list_task_tracks(hub_id)
         .expect("list distinct task tracks");
     assert_eq!(
         tracks,
-        vec!["Activation".to_string(), "Retention".to_string()]
+        vec![
+            TaskTrack::new("Activation").unwrap(),
+            TaskTrack::new("Retention").unwrap()
+        ]
     );
 
     let (total, tasks) = repo
-        .list_tasks(TaskListQuery::new(hub_id.get()).unwrap())
+        .list_tasks(TaskListQuery::new(hub_id))
         .expect("list tasks");
     assert_eq!(total, 2);
     assert_eq!(tasks.len(), 2);
 
-    let filters = TaskListFilters::new(hub_id).search(SearchTerm::new("Alpha").unwrap());
+    let filters = TaskListFilters::new(hub_id).search("Alpha");
     let (search_total, search_results) = repo
-        .list_tasks(
-            TaskListQuery::new(hub_id.get())
-                .unwrap()
-                .with_filters(filters),
-        )
+        .list_tasks(TaskListQuery::new(hub_id).with_filters(filters))
         .expect("search tasks");
     assert_eq!(search_total, 1);
     assert_eq!(search_results[0].id, alpha.id);
 
     let status_filters = TaskListFilters::new(hub_id).with_status(TaskStatus::InProgress);
     let (status_total, status_results) = repo
-        .list_tasks(
-            TaskListQuery::new(hub_id.get())
-                .unwrap()
-                .with_filters(status_filters),
-        )
+        .list_tasks(TaskListQuery::new(hub_id).with_filters(status_filters))
         .expect("status filter");
     assert_eq!(status_total, 1);
     assert_eq!(status_results[0].id, beta.id);
 
     let assignee_filters = TaskListFilters::new(hub_id).for_assignee(assignee.id);
     let (assignee_total, assignee_results) = repo
-        .list_tasks(
-            TaskListQuery::new(hub_id.get())
-                .unwrap()
-                .with_filters(assignee_filters),
-        )
+        .list_tasks(TaskListQuery::new(hub_id).with_filters(assignee_filters))
         .expect("assignee filter");
     assert_eq!(assignee_total, 1);
     assert_eq!(assignee_results[0].id, beta.id);
@@ -310,11 +290,7 @@ fn test_task_repository_crud() {
     let due_filters = TaskListFilters::new(hub_id)
         .due_after(NaiveDate::from_ymd_opt(2024, 1, 15).expect("valid date"));
     let (due_total, due_results) = repo
-        .list_tasks(
-            TaskListQuery::new(hub_id.get())
-                .unwrap()
-                .with_filters(due_filters),
-        )
+        .list_tasks(TaskListQuery::new(hub_id).with_filters(due_filters))
         .expect("due filter");
     assert_eq!(due_total, 1);
     assert_eq!(due_results[0].id, beta.id);
@@ -323,7 +299,7 @@ fn test_task_repository_crud() {
         .title(TaskTitle::new("Alpha Updated").unwrap())
         .status(TaskStatus::Completed);
     alpha = repo
-        .update_task(alpha.id.get(), hub_id.get(), &update)
+        .update_task(alpha.id, hub_id, &update)
         .expect("update alpha");
     assert_eq!(alpha.title.as_str(), "Alpha Updated");
     assert_eq!(alpha.status, TaskStatus::Completed);
@@ -331,7 +307,7 @@ fn test_task_repository_crud() {
     let cross_update =
         DomainUpdateTask::from_task(&alpha).title(TaskTitle::new("Intruder").unwrap());
     let err = repo
-        .update_task(alpha.id.get(), 2, &cross_update)
+        .update_task(alpha.id, HubId::new(2).unwrap(), &cross_update)
         .expect_err("cross hub update should fail");
     assert!(matches!(err, RepositoryError::NotFound));
 
@@ -340,42 +316,40 @@ fn test_task_repository_crud() {
         .expect("record assignment");
 
     let assignments = repo
-        .list_assignments_for_task(beta.id.get(), hub_id.get())
+        .list_assignments_for_task(beta.id, hub_id)
         .expect("list assignments");
     assert_eq!(assignments.len(), 1);
     assert_eq!(assignments[0].assignee_id, assignee.id);
 
     let err = repo
-        .remove_assignment(beta.id.get(), 2, assignee.id.get())
+        .remove_assignment(beta.id, HubId::new(2).unwrap(), assignee.id)
         .expect_err("cross hub assignment removal");
     assert!(matches!(err, RepositoryError::NotFound));
 
-    repo.remove_assignment(beta.id.get(), hub_id.get(), assignee.id.get())
+    repo.remove_assignment(beta.id, hub_id, assignee.id)
         .expect("remove assignment");
     assert!(
-        repo.list_assignments_for_task(beta.id.get(), hub_id.get())
+        repo.list_assignments_for_task(beta.id, hub_id)
             .expect("assignments after remove")
             .is_empty()
     );
 
     let err = repo
-        .delete_task(beta.id.get(), 2)
+        .delete_task(beta.id, HubId::new(2).unwrap())
         .expect_err("cross hub delete should fail");
     assert!(matches!(err, RepositoryError::NotFound));
 
-    repo.delete_task(beta.id.get(), hub_id.get())
-        .expect("delete beta");
-    repo.delete_task(alpha.id.get(), hub_id.get())
-        .expect("delete alpha");
+    repo.delete_task(beta.id, hub_id).expect("delete beta");
+    repo.delete_task(alpha.id, hub_id).expect("delete alpha");
 
     assert!(
-        repo.get_task_by_id(alpha.id.get(), hub_id.get())
+        repo.get_task_by_id(alpha.id, hub_id)
             .expect("get alpha after delete")
             .is_none()
     );
 
     let (total_after, tasks_after) = repo
-        .list_tasks(TaskListQuery::new(1).unwrap())
+        .list_tasks(TaskListQuery::new(hub_id))
         .expect("list after deletes");
     assert_eq!(total_after, 0);
     assert!(tasks_after.is_empty());

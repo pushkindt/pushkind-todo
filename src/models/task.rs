@@ -115,19 +115,10 @@ impl TryFrom<Task> for DomainTask {
             completed_at,
         } = value;
 
-        let status = {
-            let candidate = TaskStatus::from(status_text.as_str());
-            let canonical: &'static str = candidate.into();
-            if canonical == status_text.as_str() {
-                candidate
-            } else {
-                log::warn!("Failed to decode task status '{}'", status_text);
-                TaskStatus::Pending
-            }
-        };
+        let status = TaskStatus::try_from(status_text.as_str())?;
 
         let priority = {
-            let candidate = TaskPriority::from(priority_text.as_str());
+            let candidate = TaskPriority::try_from(priority_text.as_str())?;
             let canonical: &'static str = candidate.into();
             if canonical == priority_text.as_str() {
                 candidate
@@ -141,7 +132,7 @@ impl TryFrom<Task> for DomainTask {
             id: TaskId::new(id)?,
             hub_id: HubId::new(hub_id)?,
             title: TaskTitle::new(title)?,
-            description: description.map(TaskDescription::from),
+            description: description.map(TaskDescription::new).transpose()?,
             track: track.map(TaskTrack::new).transpose()?,
             priority,
             status,
@@ -173,13 +164,13 @@ impl Task {
             completed_at,
         } = self;
 
-        let status = TaskStatus::from(raw_status.as_str());
+        let status = TaskStatus::try_from(raw_status.as_str())?;
         let canonical: &'static str = status.into();
         if canonical != raw_status.as_str() {
             return Err(TaskModelError::UnknownStatus { status: raw_status });
         }
 
-        let priority = TaskPriority::from(raw_priority.as_str());
+        let priority = TaskPriority::try_from(raw_priority.as_str())?;
         let canonical_priority: &'static str = priority.into();
         if canonical_priority != raw_priority.as_str() {
             return Err(TaskModelError::UnknownPriority {
@@ -191,7 +182,7 @@ impl Task {
             id: TaskId::new(id)?,
             hub_id: HubId::new(hub_id)?,
             title: TaskTitle::new(title)?,
-            description: description.map(TaskDescription::from),
+            description: description.map(TaskDescription::new).transpose()?,
             track: track.map(TaskTrack::new).transpose()?,
             priority,
             status,

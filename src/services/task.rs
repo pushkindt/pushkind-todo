@@ -9,65 +9,65 @@ use pushkind_common::routes::ensure_role;
 use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
 
-use serde_json::{Value, json};
-use validator::Validate;
-
 use crate::SERVICE_ACCESS_ROLE;
+use crate::domain::types::{HubId, TaskId};
+use crate::domain::user::NewUser;
 use crate::domain::{
     task::{Task, TaskStatus, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent, TaskEventType},
     types::UserId,
     user::User,
 };
-use crate::forms::task::{NewTaskCommentForm, TaskUpdateSubmission, UpdateTaskForm};
+use crate::forms::task::{
+    QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
+    UpdateTaskForm, UpdateTaskPayload,
+};
 use crate::repository::{
     TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
 use crate::services::{ServiceError, ServiceResult};
+use serde_json::{Value, json};
 
 use super::notifications;
 use crate::dto::task::{TaskDetails, TaskEventWithAuthor, TaskModalData};
 
 /// Load a task and its events for the provided user, enriching with user data.
 pub fn load_task_details<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
     task_id: i32,
+    user: &AuthenticatedUser,
+    repo: &R,
 ) -> ServiceResult<TaskDetails>
 where
     R: TaskReader + TaskEventReader + UserReader + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
+
     let task = repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
+        .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
 
-    let author_id = task.author_id.get();
-    let author = repo
-        .get_user_by_id(author_id, user.hub_id)
-        .map_err(ServiceError::from)?
-        .ok_or_else(|| {
-            log::error!(
-                "Task {} references missing author {}",
-                task.id,
-                task.author_id
-            );
-            ServiceError::Internal
-        })?;
+    let author_id = task.author_id;
+    let author = repo.get_user_by_id(author_id, hub_id)?.ok_or_else(|| {
+        log::error!(
+            "Task {} references missing author {}",
+            task.id,
+            task.author_id
+        );
+        ServiceError::Internal
+    })?;
 
     let assignee = match task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(user) => user,
             Err(err) => return Err(ServiceError::from(err)),
         },
         None => None,
     };
 
-    let events = repo
-        .list_events_for_task(task.id.get(), user.hub_id)
-        .map_err(ServiceError::from)?;
+    let events = repo.list_events_for_task(task.id, hub_id)?;
 
     let mut author_cache: HashMap<UserId, User> = HashMap::new();
     for event in &events {
@@ -76,7 +76,7 @@ where
                 continue;
             }
 
-            match repo.get_user_by_id(author_id.get(), user.hub_id) {
+            match repo.get_user_by_id(author_id, hub_id) {
                 Ok(Some(user)) => {
                     author_cache.insert(author_id, user);
                 }
@@ -105,22 +105,24 @@ where
 
 /// Load the task along with supporting data required by the modal view.
 pub fn load_task_modal<R>(
-    repo: &R,
-    user: &AuthenticatedUser,
     task_id: i32,
+    user: &AuthenticatedUser,
+    repo: &R,
 ) -> ServiceResult<TaskModalData>
 where
     R: TaskReader + UserReader + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
+
     let task = repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
+        .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
 
     let assignee = match task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(Some(user)) => Some(user),
             Ok(None) => {
                 log::warn!(
@@ -136,11 +138,9 @@ where
         None => None,
     };
 
-    let (_total, users) = repo
-        .list_users(UserListQuery::new(user.hub_id))
-        .map_err(ServiceError::from)?;
+    let (_total, users) = repo.list_users(UserListQuery::new(hub_id))?;
 
-    let tracks = repo.list_task_tracks(user.hub_id)?;
+    let tracks = repo.list_task_tracks(hub_id)?;
 
     Ok(TaskModalData {
         task,
@@ -152,11 +152,11 @@ where
 
 /// Update a task with the values submitted from the edit form.
 pub fn update_task<R, Z>(
-    repo: &R,
-    zmq_sender: &Z,
-    user: &AuthenticatedUser,
     task_id: i32,
     form: UpdateTaskForm,
+    user: &AuthenticatedUser,
+    repo: &R,
+    zmq_sender: &Z,
 ) -> ServiceResult<Task>
 where
     R: TaskReader
@@ -170,21 +170,12 @@ where
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    if let Err(err) = form.validate() {
-        log::error!("Failed to validate form: {err}");
-        return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
-    }
+    let submission = UpdateTaskPayload::try_from(form)?;
 
-    let submission = match form.into_submission(task_id) {
-        Ok(submission) => submission,
-        Err(err) => {
-            log::error!("Failed to validate form: {err}");
-            return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
-        }
-    };
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
 
-    let TaskUpdateSubmission {
-        task_id,
+    let UpdateTaskPayload {
         title,
         description,
         track,
@@ -195,15 +186,12 @@ where
     } = submission;
 
     let current_task = repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
+        .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
 
     let assignee_user = match assignee {
         Some(assignee) => {
-            let new_user = assignee
-                .into_new_user(user.hub_id)
-                .map_err(ServiceError::from)?;
+            let new_user = assignee.into_domain(hub_id)?;
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -211,7 +199,8 @@ where
 
     let mut updates = UpdateTask::from_task(&current_task)
         .title(title)
-        .status(status);
+        .status(status)
+        .priority(priority);
 
     updates = match description {
         Some(body) => updates.description(body),
@@ -222,10 +211,6 @@ where
         Some(body) => updates.track(body),
         None => updates.clear_track(),
     };
-
-    if let Some(priority) = priority {
-        updates = updates.priority(priority);
-    }
 
     updates = match due_date {
         Some(date) => updates.due_date(date),
@@ -238,27 +223,18 @@ where
         assignee_user.as_ref().map(|user| user.id),
     );
 
-    let updated = repo
-        .update_task(task_id, user.hub_id, &updates)
-        .map_err(|err| match err {
-            RepositoryError::NotFound => ServiceError::NotFound,
-            other => ServiceError::from(other),
-        })?;
+    let updated = repo.update_task(task_id, hub_id, &updates)?;
 
     let status_event_data = status_event_payload(current_task.status, updated.status);
 
     let assignment_event_data = if current_task.assigned_to != updated.assigned_to {
         let previous_assignee = match current_task.assigned_to {
-            Some(assignee_id) => repo
-                .get_user_by_id(assignee_id.get(), user.hub_id)
-                .map_err(ServiceError::from)?,
+            Some(assignee_id) => repo.get_user_by_id(assignee_id, hub_id)?,
             None => None,
         };
 
         let new_assignee = match updated.assigned_to {
-            Some(assignee_id) => repo
-                .get_user_by_id(assignee_id.get(), user.hub_id)
-                .map_err(ServiceError::from)?,
+            Some(assignee_id) => repo.get_user_by_id(assignee_id, hub_id)?,
             None => None,
         };
 
@@ -273,7 +249,7 @@ where
         || assignment_event_data.is_some()
         || metadata_event_data.is_some()
     {
-        let new_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
+        let new_user = NewUser::try_from(user)?;
         let actor = repo.create_or_update_user(&new_user)?;
 
         if let Some(data) = status_event_data {
@@ -283,7 +259,7 @@ where
                 TaskEventType::StatusChanged,
                 data,
             );
-            repo.record_event(&event).map_err(ServiceError::from)?;
+            repo.record_event(&event)?;
         }
 
         if let Some(data) = assignment_event_data {
@@ -293,7 +269,7 @@ where
                 TaskEventType::AssignmentChanged,
                 data,
             );
-            repo.record_event(&event).map_err(ServiceError::from)?;
+            repo.record_event(&event)?;
         }
 
         if let Some(data) = metadata_event_data {
@@ -303,23 +279,19 @@ where
                 TaskEventType::MetadataUpdated,
                 data,
             );
-            repo.record_event(&event).map_err(ServiceError::from)?;
+            repo.record_event(&event)?;
         }
 
-        repo.touch_visited_at(actor.id.get(), actor.hub_id.get())?;
+        repo.touch_visited_at(actor.id, actor.hub_id)?;
     }
 
-    let author_user = repo
-        .get_user_by_id(updated.author_id.get(), user.hub_id)
-        .map_err(ServiceError::from)?;
+    let author_user = repo.get_user_by_id(updated.author_id, hub_id)?;
 
     let event_actors = {
         let mut actors = Vec::new();
         let mut seen_actor_ids = HashSet::new();
 
-        let events = repo
-            .list_events_for_task(updated.id.get(), user.hub_id)
-            .map_err(ServiceError::from)?;
+        let events = repo.list_events_for_task(updated.id, hub_id)?;
 
         for event in events {
             if let Some(actor_id) = event.user_id {
@@ -327,7 +299,7 @@ where
                     continue;
                 }
 
-                match repo.get_user_by_id(actor_id.get(), user.hub_id) {
+                match repo.get_user_by_id(actor_id, hub_id) {
                     Ok(Some(actor)) => actors.push(actor),
                     Ok(None) => {
                         log::warn!(
@@ -361,13 +333,11 @@ where
 
 /// Transition the task status with a lightweight quick action from the UI.
 pub fn transition_task_status<R, Z>(
+    task_id: i32,
+    form: QuickTaskStatusForm,
+    user: &AuthenticatedUser,
     repo: &R,
     zmq_sender: &Z,
-    user: &AuthenticatedUser,
-    task_id: i32,
-    new_status: TaskStatus,
-    comment: Option<String>,
-    assign_self: bool,
 ) -> ServiceResult<Task>
 where
     R: TaskReader
@@ -381,46 +351,50 @@ where
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
+    let payload: QuickTaskStatusPayload = form.try_into()?;
+
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
+
     let current_task = repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
+        .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
 
-    if current_task.status == new_status {
+    if current_task.status == payload.status {
         return Err(ServiceError::Form("Статус уже установлен.".to_string()));
     }
 
-    let actor_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
+    let actor_user = NewUser::try_from(user)?;
     let actor = repo.create_or_update_user(&actor_user)?;
 
     let previous_assignee = match current_task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(user) => user,
             Err(err) => return Err(ServiceError::from(err)),
         },
         None => None,
     };
 
-    let mut updates = UpdateTask::from_task(&current_task).status(new_status);
-    if new_status == TaskStatus::Completed {
+    let mut updates = UpdateTask::from_task(&current_task).status(payload.status);
+    if payload.status == TaskStatus::Completed {
         updates = updates.completed_at(Local::now().naive_utc());
     } else {
         updates = updates.clear_completed_at();
     }
 
-    if assign_self && new_status == TaskStatus::InProgress {
+    if payload.assign_self && payload.status == TaskStatus::InProgress {
         updates = updates.assign_to(actor.id);
     }
 
     let updated = repo
-        .update_task(task_id, user.hub_id, &updates)
+        .update_task(task_id, hub_id, &updates)
         .map_err(|err| match err {
             RepositoryError::NotFound => ServiceError::NotFound,
             other => ServiceError::from(other),
         })?;
 
     let assignee_user = match updated.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id.get(), user.hub_id) {
+        Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(user) => user,
             Err(err) => return Err(ServiceError::from(err)),
         },
@@ -441,7 +415,7 @@ where
                 TaskEventType::StatusChanged,
                 data,
             );
-            repo.record_event(&event).map_err(ServiceError::from)?;
+            repo.record_event(&event)?;
             recorded = true;
         }
 
@@ -452,23 +426,19 @@ where
                 TaskEventType::AssignmentChanged,
                 data,
             );
-            repo.record_event(&event).map_err(ServiceError::from)?;
+            repo.record_event(&event)?;
             recorded = true;
         }
 
         if recorded {
-            repo.touch_visited_at(actor.id.get(), actor.hub_id.get())?;
+            repo.touch_visited_at(actor.id, actor.hub_id)?;
         }
     }
 
-    let author_user = repo
-        .get_user_by_id(updated.author_id.get(), user.hub_id)
-        .map_err(ServiceError::from)?;
+    let author_user = repo.get_user_by_id(updated.author_id, hub_id)?;
 
     let assignee_user = match updated.assigned_to {
-        Some(assignee_id) => repo
-            .get_user_by_id(assignee_id.get(), user.hub_id)
-            .map_err(ServiceError::from)?,
+        Some(assignee_id) => repo.get_user_by_id(assignee_id, hub_id)?,
         None => None,
     };
 
@@ -476,9 +446,7 @@ where
         let mut actors = Vec::new();
         let mut seen_actor_ids = HashSet::new();
 
-        let events = repo
-            .list_events_for_task(updated.id.get(), user.hub_id)
-            .map_err(ServiceError::from)?;
+        let events = repo.list_events_for_task(updated.id, hub_id)?;
 
         for event in events {
             if let Some(actor_id) = event.user_id {
@@ -486,7 +454,7 @@ where
                     continue;
                 }
 
-                match repo.get_user_by_id(actor_id.get(), user.hub_id) {
+                match repo.get_user_by_id(actor_id, hub_id) {
                     Ok(Some(actor)) => actors.push(actor),
                     Ok(None) => {
                         log::warn!(
@@ -515,29 +483,16 @@ where
         log::error!("Failed to queue task-updated email: {err}");
     }
 
-    if let Some(comment_text) = normalize_status_comment(comment) {
-        let form = NewTaskCommentForm {
-            message: comment_text,
+    if let Some(comment_text) = payload.comment {
+        let form = TaskCommentForm {
+            message: comment_text.to_string(),
         };
-        if let Err(err) = add_task_comment(repo, zmq_sender, user, task_id, form) {
+        if let Err(err) = add_task_comment(task_id.get(), form, user, repo, zmq_sender) {
             log::error!("Failed to attach quick status comment for task {task_id}: {err}");
         }
     }
 
     Ok(updated)
-}
-
-/// Trim and sanitize quick status comments before persisting.
-fn normalize_status_comment(value: Option<String>) -> Option<String> {
-    value.and_then(|text| {
-        let cleaned = ammonia::clean(&text);
-        let trimmed = cleaned.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
 }
 
 /// Adjust the update payload to reflect new assignee decisions.
@@ -756,11 +711,11 @@ fn build_task_updated_email(
 
 /// Record a new comment on the specified task from the current user.
 pub fn add_task_comment<R, Z>(
+    task_id: i32,
+    form: TaskCommentForm,
+    user: &AuthenticatedUser,
     repo: &R,
     zmq_sender: &Z,
-    user: &AuthenticatedUser,
-    task_id: i32,
-    form: NewTaskCommentForm,
 ) -> ServiceResult<TaskEvent>
 where
     R: TaskReader + TaskEventReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
@@ -768,46 +723,37 @@ where
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    if let Err(err) = form.validate() {
-        log::error!("Failed to validate comment form: {err}");
-        return Err(ServiceError::Form("Ошибка валидации формы".to_string()));
-    }
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
 
+    let payload = TaskCommentPayload::try_from(form)?;
     let task = repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
+        .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
 
-    let new_user = crate::domain::user::NewUser::try_from(user).map_err(ServiceError::from)?;
+    let new_user = NewUser::try_from(user)?;
     let comment_author = repo.create_or_update_user(&new_user)?;
 
-    let submission = form.into_submission();
-    let comment_text = submission.text;
+    let comment_text = payload.message.to_string();
     let event = NewTaskEvent::new(
         task.id,
         Some(comment_author.id),
         TaskEventType::Comment,
-        json!({ "text": comment_text.clone() }),
+        json!({ "text": comment_text }),
     );
 
-    let recorded = repo.record_event(&event).map_err(ServiceError::from)?;
+    let recorded = repo.record_event(&event)?;
 
-    repo.touch_visited_at(comment_author.id.get(), comment_author.hub_id.get())?;
+    repo.touch_visited_at(comment_author.id, comment_author.hub_id)?;
 
-    let task_author = repo
-        .get_user_by_id(task.author_id.get(), user.hub_id)
-        .map_err(ServiceError::from)?;
+    let task_author = repo.get_user_by_id(task.author_id, hub_id)?;
 
     let task_assignee = match task.assigned_to {
-        Some(assignee_id) => repo
-            .get_user_by_id(assignee_id.get(), user.hub_id)
-            .map_err(ServiceError::from)?,
+        Some(assignee_id) => repo.get_user_by_id(assignee_id, hub_id)?,
         None => None,
     };
 
-    let task_events = repo
-        .list_events_for_task(task.id.get(), user.hub_id)
-        .map_err(ServiceError::from)?;
+    let task_events = repo.list_events_for_task(task.id, hub_id)?;
 
     let actor_email = comment_author.email.as_str().trim().to_lowercase();
     let mut seen = HashSet::new();
@@ -847,10 +793,7 @@ where
     }
 
     for actor_id in event_actor_ids {
-        if let Some(actor) = repo
-            .get_user_by_id(actor_id.get(), user.hub_id)
-            .map_err(ServiceError::from)?
-        {
+        if let Some(actor) = repo.get_user_by_id(actor_id, hub_id)? {
             let email = actor.email.as_str().trim().to_lowercase();
             if email != actor_email && seen.insert(email.clone()) {
                 match notifications::task_recipient(&task, &actor, "task_commented", "event_actor")
@@ -922,25 +865,20 @@ fn assignment_event_user(user: &User) -> Value {
 }
 
 /// Remove the specified task after verifying permissions and existence.
-pub fn delete_task<R>(repo: &R, user: &AuthenticatedUser, task_id: i32) -> ServiceResult<()>
+pub fn delete_task<R>(task_id: i32, user: &AuthenticatedUser, repo: &R) -> ServiceResult<()>
 where
     R: TaskReader + TaskWriter + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    if repo
-        .get_task_by_id(task_id, user.hub_id)
-        .map_err(ServiceError::from)?
-        .is_none()
-    {
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
+
+    if repo.get_task_by_id(task_id, hub_id)?.is_none() {
         return Err(ServiceError::NotFound);
     }
 
-    repo.delete_task(task_id, user.hub_id)
-        .map_err(|err| match err {
-            RepositoryError::NotFound => ServiceError::NotFound,
-            other => ServiceError::from(other),
-        })?;
+    repo.delete_task(task_id, hub_id)?;
 
     Ok(())
 }
@@ -956,16 +894,17 @@ mod tests {
     use std::cell::RefCell;
     use std::sync::Mutex;
 
+    use crate::domain::types::{TaskDescription, TaskTitle, UserName};
     use crate::domain::{
         task::{
             NewTask as DomainNewTask, TaskAssignment, TaskPriority, TaskStatus,
             UpdateTask as DomainUpdateTask,
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
-        types::{TaskId, UserId},
+        types::{HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId},
         user::User,
     };
-    use crate::forms::task::NewTaskCommentForm;
+    use crate::forms::task::TaskCommentForm;
     use crate::repository::mock::{
         MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
     };
@@ -1024,7 +963,7 @@ mod tests {
     }
 
     impl TaskReader for TaskDetailsRepo {
-        fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+        fn get_task_by_id(&self, id: TaskId, hub_id: HubId) -> RepositoryResult<Option<Task>> {
             self.task_reader.get_task_by_id(id, hub_id)
         }
 
@@ -1034,13 +973,13 @@ mod tests {
 
         fn list_assignments_for_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
 
-        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+        fn list_task_tracks(&self, hub_id: HubId) -> RepositoryResult<Vec<TaskTrack>> {
             self.task_reader.list_task_tracks(hub_id)
         }
     }
@@ -1048,23 +987,23 @@ mod tests {
     impl TaskEventReader for TaskDetailsRepo {
         fn list_events_for_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> RepositoryResult<Vec<TaskEvent>> {
             self.event_reader.list_events_for_task(task_id, hub_id)
-        }
-
-        fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>> {
-            self.event_reader.get_event_by_id(id, hub_id)
         }
     }
 
     impl UserReader for TaskDetailsRepo {
-        fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>> {
+        fn get_user_by_id(&self, id: UserId, hub_id: HubId) -> RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_id(id, hub_id)
         }
 
-        fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<User>> {
+        fn get_user_by_email(
+            &self,
+            email: &UserEmail,
+            hub_id: HubId,
+        ) -> RepositoryResult<Option<User>> {
             self.user_reader.get_user_by_email(email, hub_id)
         }
 
@@ -1088,7 +1027,7 @@ mod tests {
     }
 
     impl TaskReader for TaskDeleteRepo {
-        fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+        fn get_task_by_id(&self, id: TaskId, hub_id: HubId) -> RepositoryResult<Option<Task>> {
             self.task_reader.get_task_by_id(id, hub_id)
         }
 
@@ -1098,13 +1037,13 @@ mod tests {
 
         fn list_assignments_for_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             self.task_reader.list_assignments_for_task(task_id, hub_id)
         }
 
-        fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+        fn list_task_tracks(&self, hub_id: HubId) -> RepositoryResult<Vec<TaskTrack>> {
             self.task_reader.list_task_tracks(hub_id)
         }
     }
@@ -1116,14 +1055,14 @@ mod tests {
 
         fn update_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
             updates: &DomainUpdateTask,
         ) -> RepositoryResult<Task> {
             self.task_writer.update_task(task_id, hub_id, updates)
         }
 
-        fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
+        fn delete_task(&self, task_id: TaskId, hub_id: HubId) -> RepositoryResult<()> {
             self.task_writer.delete_task(task_id, hub_id)
         }
 
@@ -1133,9 +1072,9 @@ mod tests {
 
         fn remove_assignment(
             &self,
-            task_id: i32,
-            hub_id: i32,
-            assignee_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
+            assignee_id: UserId,
         ) -> RepositoryResult<()> {
             self.task_writer
                 .remove_assignment(task_id, hub_id, assignee_id)
@@ -1153,12 +1092,11 @@ mod tests {
     }
 
     fn sample_task(id: i32, hub_id: i32, assigned_to: Option<i32>, author_id: i32) -> Task {
-        use crate::domain::types::{HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId};
         Task {
             id: TaskId::new(id).unwrap(),
             hub_id: HubId::new(hub_id).unwrap(),
             title: TaskTitle::new("Test Task").unwrap(),
-            description: Some(TaskDescription::from("Detail")),
+            description: Some(TaskDescription::new("Detail").unwrap()),
             track: Some(TaskTrack::new("Default Track").unwrap()),
             priority: TaskPriority::default(),
             status: TaskStatus::Pending,
@@ -1172,7 +1110,6 @@ mod tests {
     }
 
     fn sample_event(id: i32, task_id: TaskId, user_id: Option<UserId>) -> TaskEvent {
-        use crate::domain::types::TaskEventId;
         TaskEvent {
             id: TaskEventId::new(id).unwrap(),
             task_id,
@@ -1184,7 +1121,6 @@ mod tests {
     }
 
     fn sample_user(id: i32, hub_id: i32, name: &str, email: &str) -> User {
-        use crate::domain::types::{HubId, UserEmail, UserId, UserName};
         User {
             id: UserId::new(id).unwrap(),
             hub_id: HubId::new(hub_id).unwrap(),
@@ -1272,10 +1208,10 @@ mod tests {
     fn metadata_event_payload_emits_differences() {
         let current = sample_task(1, 1, None, 2);
         let mut updated = current.clone();
-        updated.title = crate::domain::types::TaskTitle::new("Updated").unwrap();
-        updated.description = Some(crate::domain::types::TaskDescription::from("New"));
+        updated.title = TaskTitle::new("Updated").unwrap();
+        updated.description = Some(TaskDescription::new("New").unwrap());
         updated.due_date = Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap());
-        updated.track = Some(crate::domain::types::TaskTrack::new("Updated Track").unwrap());
+        updated.track = Some(TaskTrack::new("Updated Track").unwrap());
         updated.priority = TaskPriority::High;
 
         let payload =
@@ -1311,13 +1247,13 @@ mod tests {
 
         let mut repo = TaskDetailsRepo::new();
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
-        let hub_id = user.hub_id;
+        let hub_id = HubId::new(user.hub_id).unwrap();
 
         let task_for_return = task.clone();
         repo.task_reader
             .expect_get_task_by_id()
             .return_once(move |id, hub| {
-                assert_eq!(id, task_for_return.id.get());
+                assert_eq!(id, task_for_return.id);
                 assert_eq!(hub, hub_id);
                 Ok(Some(task_for_return))
             });
@@ -1326,7 +1262,7 @@ mod tests {
         repo.event_reader
             .expect_list_events_for_task()
             .return_once(move |task_id, hub| {
-                assert_eq!(task_id, event_for_return.task_id.get());
+                assert_eq!(task_id, event_for_return.task_id);
                 assert_eq!(hub, hub_id);
                 Ok(vec![event_for_return])
             });
@@ -1339,7 +1275,7 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, author_for_author_lookup.id.get());
+                assert_eq!(id, author_for_author_lookup.id);
                 assert_eq!(hub, hub_id);
                 Ok(Some(author_for_author_lookup))
             });
@@ -1350,7 +1286,7 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, assignee_for_lookup.id.get());
+                assert_eq!(id, assignee_for_lookup.id);
                 assert_eq!(hub, hub_id);
                 Ok(Some(assignee_for_lookup))
             });
@@ -1361,12 +1297,12 @@ mod tests {
             .times(1)
             .in_sequence(&mut sequence)
             .return_once(move |id, hub| {
-                assert_eq!(id, author_for_event_lookup.id.get());
+                assert_eq!(id, author_for_event_lookup.id);
                 assert_eq!(hub, hub_id);
                 Ok(Some(author_for_event_lookup))
             });
 
-        let result = load_task_details(&repo, &user, task.id.get()).expect("should load task");
+        let result = load_task_details(task.id.get(), &user, &repo).expect("should load task");
 
         assert_eq!(result.task.id, task.id);
         assert_eq!(result.author.id, author.id);
@@ -1385,7 +1321,7 @@ mod tests {
         let repo = TaskDetailsRepo::new();
         let user = user_with_roles(&[]);
 
-        let result = load_task_details(&repo, &user, 5);
+        let result = load_task_details(5, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1398,7 +1334,7 @@ mod tests {
             .return_once(|_, _| Ok(None));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let result = load_task_details(&repo, &user, 99);
+        let result = load_task_details(99, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -1411,7 +1347,7 @@ mod tests {
             .return_once(|_, _| Err(RepositoryError::Unexpected("boom".to_string())));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let result = load_task_details(&repo, &user, 1);
+        let result = load_task_details(1, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Repository(_))));
     }
@@ -1421,7 +1357,7 @@ mod tests {
         let repo = TaskDeleteRepo::new();
         let user = user_with_roles(&[]);
 
-        let result = delete_task(&repo, &user, 1);
+        let result = delete_task(1, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1434,7 +1370,7 @@ mod tests {
             .return_once(|_, _| Ok(None));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let result = delete_task(&repo, &user, 99);
+        let result = delete_task(99, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -1446,8 +1382,8 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id.get());
-                assert_eq!(hub, task_clone.hub_id.get());
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
                 Ok(Some(task_clone))
             }
         });
@@ -1456,7 +1392,7 @@ mod tests {
             .return_once(|_, _| Err(RepositoryError::NotFound));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let result = delete_task(&repo, &user, 5);
+        let result = delete_task(5, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -1468,21 +1404,21 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id.get());
-                assert_eq!(hub, task_clone.hub_id.get());
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
                 Ok(Some(task_clone))
             }
         });
         repo.task_writer.expect_delete_task().return_once({
             move |id, hub| {
-                assert_eq!(id, task.id.get());
-                assert_eq!(hub, task.hub_id.get());
+                assert_eq!(id, task.id);
+                assert_eq!(hub, task.hub_id);
                 Ok(())
             }
         });
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        delete_task(&repo, &user, 7).expect("should delete task");
+        delete_task(7, &user, &repo).expect("should delete task");
     }
 
     #[test]
@@ -1492,8 +1428,8 @@ mod tests {
         repo.task_reader.expect_get_task_by_id().return_once({
             let task_clone = task.clone();
             move |id, hub| {
-                assert_eq!(id, task_clone.id.get());
-                assert_eq!(hub, task_clone.hub_id.get());
+                assert_eq!(id, task_clone.id);
+                assert_eq!(hub, task_clone.hub_id);
                 Ok(Some(task_clone))
             }
         });
@@ -1502,7 +1438,7 @@ mod tests {
             .return_once(|_, _| Err(RepositoryError::Unexpected("boom".to_string())));
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let result = delete_task(&repo, &user, 1);
+        let result = delete_task(1, &user, &repo);
 
         assert!(matches!(result, Err(ServiceError::Repository(_))));
     }
@@ -1540,9 +1476,9 @@ mod tests {
     }
 
     impl TaskReader for UpdateRepo {
-        fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<Task>> {
+        fn get_task_by_id(&self, id: TaskId, hub_id: HubId) -> RepositoryResult<Option<Task>> {
             let task = self.task.borrow();
-            if task.id.get() == id && task.hub_id.get() == hub_id {
+            if task.id == id && task.hub_id == hub_id {
                 Ok(Some(task.clone()))
             } else {
                 Ok(None)
@@ -1555,13 +1491,13 @@ mod tests {
 
         fn list_assignments_for_task(
             &self,
-            _: i32,
-            _: i32,
+            _: TaskId,
+            _: HubId,
         ) -> RepositoryResult<Vec<TaskAssignment>> {
             Ok(Vec::new())
         }
 
-        fn list_task_tracks(&self, _: i32) -> RepositoryResult<Vec<String>> {
+        fn list_task_tracks(&self, _: HubId) -> RepositoryResult<Vec<TaskTrack>> {
             Ok(Vec::new())
         }
     }
@@ -1573,12 +1509,12 @@ mod tests {
 
         fn update_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
             updates: &DomainUpdateTask,
         ) -> RepositoryResult<Task> {
             let mut task = self.task.borrow_mut();
-            if task.id.get() != task_id || task.hub_id.get() != hub_id {
+            if task.id != task_id || task.hub_id != hub_id {
                 return Err(RepositoryError::NotFound);
             }
 
@@ -1595,7 +1531,7 @@ mod tests {
             Ok(task.clone())
         }
 
-        fn delete_task(&self, _: i32, _: i32) -> RepositoryResult<()> {
+        fn delete_task(&self, _: TaskId, _: HubId) -> RepositoryResult<()> {
             Ok(())
         }
 
@@ -1603,7 +1539,7 @@ mod tests {
             Ok(())
         }
 
-        fn remove_assignment(&self, _: i32, _: i32, _: i32) -> RepositoryResult<()> {
+        fn remove_assignment(&self, _: TaskId, _: HubId, _: UserId) -> RepositoryResult<()> {
             Ok(())
         }
     }
@@ -1611,49 +1547,39 @@ mod tests {
     impl TaskEventReader for UpdateRepo {
         fn list_events_for_task(
             &self,
-            task_id: i32,
-            hub_id: i32,
+            task_id: TaskId,
+            hub_id: HubId,
         ) -> RepositoryResult<Vec<TaskEvent>> {
             let task = self.task.borrow();
-            if task.id.get() != task_id || task.hub_id.get() != hub_id {
+            if task.id != task_id || task.hub_id != hub_id {
                 return Ok(Vec::new());
             }
 
             Ok(self.events.borrow().clone())
         }
-
-        fn get_event_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<TaskEvent>> {
-            let task = self.task.borrow();
-            if task.hub_id.get() != hub_id {
-                return Ok(None);
-            }
-
-            Ok(self
-                .events
-                .borrow()
-                .iter()
-                .find(|&event| event.id.get() == id)
-                .cloned())
-        }
     }
 
     impl UserReader for UpdateRepo {
-        fn get_user_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<User>> {
+        fn get_user_by_id(&self, id: UserId, hub_id: HubId) -> RepositoryResult<Option<User>> {
             Ok(self
                 .users
                 .borrow()
                 .values()
-                .find(|user| user.id.get() == id && user.hub_id.get() == hub_id)
+                .find(|user| user.id == id && user.hub_id == hub_id)
                 .cloned())
         }
 
-        fn get_user_by_email(&self, email: &str, hub_id: i32) -> RepositoryResult<Option<User>> {
+        fn get_user_by_email(
+            &self,
+            email: &UserEmail,
+            hub_id: HubId,
+        ) -> RepositoryResult<Option<User>> {
             Ok(self
                 .users
                 .borrow()
-                .get(&email.trim().to_lowercase())
+                .get(&email.as_str().trim().to_lowercase())
                 .cloned()
-                .filter(|user| user.hub_id.get() == hub_id))
+                .filter(|user| user.hub_id == hub_id))
         }
 
         fn list_users(&self, _: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
@@ -1679,7 +1605,7 @@ mod tests {
             };
 
             let user = User {
-                id: crate::domain::types::UserId::new(id).unwrap(),
+                id: UserId::new(id).unwrap(),
                 hub_id: new_user.hub_id,
                 name: new_user.name.clone(),
                 email: new_user.email.clone(),
@@ -1695,18 +1621,18 @@ mod tests {
 
         fn update_user(
             &self,
-            _: i32,
-            _: i32,
+            _: UserId,
+            _: HubId,
             _: &crate::domain::user::UpdateUser,
         ) -> RepositoryResult<User> {
             Err(RepositoryError::NotFound)
         }
 
-        fn delete_user(&self, _: i32, _: i32) -> RepositoryResult<()> {
+        fn delete_user(&self, _: UserId, _: HubId) -> RepositoryResult<()> {
             Err(RepositoryError::NotFound)
         }
 
-        fn touch_visited_at(&self, _: i32, _: i32) -> RepositoryResult<()> {
+        fn touch_visited_at(&self, _: UserId, _: HubId) -> RepositoryResult<()> {
             Ok(())
         }
     }
@@ -1719,7 +1645,7 @@ mod tests {
             *next_id += 1;
 
             let record = TaskEvent {
-                id: crate::domain::types::TaskEventId::new(id).unwrap(),
+                id: TaskEventId::new(id).unwrap(),
                 task_id: event.task_id,
                 user_id: event.user_id,
                 event_type: event.event_type,
@@ -1731,7 +1657,7 @@ mod tests {
             Ok(record)
         }
 
-        fn delete_event(&self, _: i32, _: i32) -> RepositoryResult<()> {
+        fn delete_event(&self, _: TaskEventId, _: HubId) -> RepositoryResult<()> {
             Ok(())
         }
     }
@@ -1749,6 +1675,7 @@ mod tests {
             "title": "Updated title",
             "message": "Updated description",
             "status": "InProgress",
+            "priority": "Middle",
             "due_date": due_date.to_string(),
             "id": assignee.email.as_str(),
             "name": assignee.name.as_str(),
@@ -1756,9 +1683,9 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(&repo, &zmq, &user, 42, form).expect("should update task");
+        let outcome = update_task(42, form, &user, &repo, &zmq).expect("should update task");
 
-        assert_eq!(outcome.id.get(), 42);
+        assert_eq!(outcome.id, TaskId::new(42).unwrap());
         assert_eq!(outcome.title.as_str(), "Updated title");
 
         let stored = repo.task.borrow().clone();
@@ -1838,7 +1765,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(&repo, &zmq, &user, 50, form).expect("should update task");
+        let outcome = update_task(50, form, &user, &repo, &zmq).expect("should update task");
 
         assert_eq!(outcome.title.as_str(), "Updated title");
 
@@ -1899,6 +1826,7 @@ mod tests {
             "title": "Updated title",
             "message": "Updated description",
             "status": "InProgress",
+            "priority": "Middle",
             "due_date": "2024-05-01",
             "name": assignee.name.as_str(),
             "email": assignee.email.as_str(),
@@ -1906,7 +1834,7 @@ mod tests {
         .expect("valid form payload");
 
         let outcome =
-            update_task(&repo, &zmq, &user, task.id.get(), form).expect("should update task");
+            update_task(task.id.get(), form, &user, &repo, &zmq).expect("should update task");
 
         assert_eq!(outcome.title.as_str(), "Updated title");
 
@@ -1952,13 +1880,14 @@ mod tests {
         let form: UpdateTaskForm = serde_json::from_value(json!({
             "title": "Updated",
             "status": "Pending",
+            "priority": "Middle",
             "id": "auth0|user-1",
             "name": "Fresh User",
             "email": "fresh@example.com",
         }))
         .expect("valid form payload");
 
-        update_task(&repo, &zmq, &user, 7, form).expect("should create assignee");
+        update_task(7, form, &user, &repo, &zmq).expect("should create assignee");
 
         let stored = repo.task.borrow().clone();
         let created = repo
@@ -2019,10 +1948,11 @@ mod tests {
         let form: UpdateTaskForm = serde_json::from_value(json!({
             "title": "Keep",
             "status": "Pending",
+            "priority": "Middle",
         }))
         .expect("valid form payload");
 
-        update_task(&repo, &zmq, &user, 9, form).expect("should unassign");
+        update_task(9, form, &user, &repo, &zmq).expect("should unassign");
 
         let stored = repo.task.borrow().clone();
         assert!(stored.assigned_to.is_none());
@@ -2078,15 +2008,16 @@ mod tests {
         let form: UpdateTaskForm = serde_json::from_value(json!({
             "title": "Updated",
             "status": "Pending",
+            "priority": "Middle",
             "id": "auth0|no-email",
             "name": "Nameless",
         }))
         .expect("valid form payload");
 
         let outcome =
-            update_task(&repo, &zmq, &user, 11, form).expect("expected update to succeed");
+            update_task(11, form, &user, &repo, &zmq).expect("expected update to succeed");
 
-        assert_eq!(outcome.id.get(), 11);
+        assert_eq!(outcome.id, TaskId::new(11).unwrap());
         assert_eq!(outcome.title.as_str(), "Updated");
 
         {
@@ -2111,10 +2042,11 @@ mod tests {
         let form: UpdateTaskForm = serde_json::from_value(json!({
             "title": "Updated",
             "status": "Pending",
+            "priority": "Middle",
         }))
         .expect("valid form payload");
 
-        let result = update_task(&repo, &zmq, &user, 12, form);
+        let result = update_task(12, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -2129,10 +2061,11 @@ mod tests {
         let form: UpdateTaskForm = serde_json::from_value(json!({
             "title": "Updated",
             "status": "Pending",
+            "priority": "Middle",
         }))
         .expect("valid form payload");
 
-        let result = update_task(&repo, &zmq, &user, 13, form);
+        let result = update_task(13, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -2145,12 +2078,12 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let zmq = MockZmqSender {};
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: "Новый комментарий".to_string(),
         };
 
         let recorded =
-            add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
+            add_task_comment(task.id.get(), form, &user, &repo, &zmq).expect("should add comment");
         assert_eq!(recorded.task_id, task.id);
         assert_eq!(recorded.event_type, TaskEventType::Comment);
         assert_eq!(recorded.event_data, json!({"text": "Новый комментарий"}));
@@ -2178,11 +2111,11 @@ mod tests {
         };
         let zmq = MockZmqSender {};
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
+        add_task_comment(task.id.get(), form, &user, &repo, &zmq).expect("should add comment");
 
         let events = repo.events.borrow();
         assert_eq!(events.len(), 1);
@@ -2223,11 +2156,11 @@ mod tests {
             exp: 0,
         };
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        add_task_comment(&repo, &zmq, &user, task.id.get(), form).expect("should add comment");
+        add_task_comment(task.id.get(), form, &user, &repo, &zmq).expect("should add comment");
 
         let payloads = zmq.messages();
         assert_eq!(payloads.len(), 1);
@@ -2269,11 +2202,11 @@ mod tests {
         let user = user_with_roles(&[]);
         let zmq = MockZmqSender {};
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        let result = add_task_comment(&repo, &zmq, &user, 91, form);
+        let result = add_task_comment(91, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -2285,11 +2218,11 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let zmq = MockZmqSender {};
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: String::new(),
         };
 
-        let result = add_task_comment(&repo, &zmq, &user, 93, form);
+        let result = add_task_comment(93, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Form(_))));
     }
@@ -2301,11 +2234,11 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let zmq = MockZmqSender {};
 
-        let form = NewTaskCommentForm {
+        let form = TaskCommentForm {
             message: "Комментарий".to_string(),
         };
 
-        let result = add_task_comment(&repo, &zmq, &user, 123, form);
+        let result = add_task_comment(123, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -2317,8 +2250,12 @@ mod tests {
         let user = user_with_roles(&[]);
         let zmq = MockZmqSender {};
 
-        let result =
-            transition_task_status(&repo, &zmq, &user, 100, TaskStatus::InProgress, None, false);
+        let form = QuickTaskStatusForm {
+            status: TaskStatus::InProgress,
+            comment: None,
+            assign_self: false,
+        };
+        let result = transition_task_status(100, form, &user, &repo, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -2330,16 +2267,13 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        let updated = transition_task_status(
-            &repo,
-            &zmq,
-            &user,
-            task.id.get(),
-            TaskStatus::InProgress,
-            None,
-            false,
-        )
-        .expect("should transition status");
+        let form = QuickTaskStatusForm {
+            status: TaskStatus::InProgress,
+            comment: None,
+            assign_self: false,
+        };
+        let updated = transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+            .expect("should transition status");
 
         assert_eq!(updated.status, TaskStatus::InProgress);
 
@@ -2355,16 +2289,13 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        transition_task_status(
-            &repo,
-            &zmq,
-            &user,
-            task.id.get(),
-            TaskStatus::InProgress,
-            None,
-            true,
-        )
-        .expect("should transition and assign");
+        let form = QuickTaskStatusForm {
+            status: TaskStatus::InProgress,
+            comment: None,
+            assign_self: true,
+        };
+        transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+            .expect("should transition and assign");
 
         let stored = repo.task.borrow().clone();
         let assigned_user = repo
@@ -2386,16 +2317,13 @@ mod tests {
         let zmq = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
-        transition_task_status(
-            &repo,
-            &zmq,
-            &user,
-            task.id.get(),
-            TaskStatus::Completed,
-            Some("Готово".to_string()),
-            false,
-        )
-        .expect("should transition status with comment");
+        let form = QuickTaskStatusForm {
+            status: TaskStatus::Completed,
+            comment: Some("Готово".to_string()),
+            assign_self: false,
+        };
+        transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+            .expect("should transition status with comment");
 
         let events = repo.events.borrow();
         assert_eq!(events.len(), 2);

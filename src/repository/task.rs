@@ -3,9 +3,12 @@ use diesel::prelude::*;
 use pushkind_common::repository::errors::{RepositoryError, RepositoryResult};
 
 use crate::{
-    domain::task::{
-        NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
-        TaskListFilters, TaskStatus, UpdateTask as DomainUpdateTask,
+    domain::{
+        task::{
+            NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
+            TaskListFilters, TaskStatus, UpdateTask as DomainUpdateTask,
+        },
+        types::{HubId, TaskId, TaskTrack, TypeConstraintError, UserId},
     },
     models::task::{
         NewTask as DbNewTask, NewTaskAssignment as DbNewTaskAssignment, Task as DbTask,
@@ -16,10 +19,11 @@ use crate::{
 
 impl TaskReader for DieselRepository {
     /// Retrieve the distinct task tracks for a hub.
-    fn list_task_tracks(&self, hub_id: i32) -> RepositoryResult<Vec<String>> {
+    fn list_task_tracks(&self, hub_id: HubId) -> RepositoryResult<Vec<TaskTrack>> {
         use crate::schema::tasks;
 
         let mut conn = self.conn()?;
+        let hub_id = i32::from(hub_id);
 
         let tracks = tasks::table
             .filter(tasks::hub_id.eq(hub_id))
@@ -27,14 +31,20 @@ impl TaskReader for DieselRepository {
             .distinct()
             .order(tasks::track)
             .load::<Option<String>>(&mut conn)?;
-        Ok(tracks.into_iter().flatten().collect())
+        Ok(tracks
+            .into_iter()
+            .flatten()
+            .map(TaskTrack::new)
+            .collect::<Result<Vec<TaskTrack>, TypeConstraintError>>()?)
     }
 
     /// Load a single task within the hub by its identifier.
-    fn get_task_by_id(&self, id: i32, hub_id: i32) -> RepositoryResult<Option<DomainTask>> {
+    fn get_task_by_id(&self, id: TaskId, hub_id: HubId) -> RepositoryResult<Option<DomainTask>> {
         use crate::schema::tasks;
 
         let mut conn = self.conn()?;
+        let id = i32::from(id);
+        let hub_id = i32::from(hub_id);
 
         let task = tasks::table
             .filter(tasks::id.eq(id))
@@ -160,12 +170,14 @@ impl TaskReader for DieselRepository {
     /// Read the history of assignments recorded for a task.
     fn list_assignments_for_task(
         &self,
-        task_id: i32,
-        hub_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
     ) -> RepositoryResult<Vec<DomainTaskAssignment>> {
         use crate::schema::task_assignments;
 
         let mut conn = self.conn()?;
+        let task_id = i32::from(task_id);
+        let hub_id = i32::from(hub_id);
 
         let assignments = task_assignments::table
             .filter(task_assignments::task_id.eq(task_id))
@@ -227,13 +239,15 @@ impl TaskWriter for DieselRepository {
     /// Persist updates to an existing task record.
     fn update_task(
         &self,
-        task_id: i32,
-        hub_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
         updates: &DomainUpdateTask,
     ) -> RepositoryResult<DomainTask> {
         use crate::schema::{tasks, users};
 
         let mut conn = self.conn()?;
+        let task_id = i32::from(task_id);
+        let hub_id = i32::from(hub_id);
 
         conn.transaction::<DomainTask, RepositoryError, _>(|conn| {
             if let Some(assignee_id) = updates.assigned_to {
@@ -265,10 +279,12 @@ impl TaskWriter for DieselRepository {
     }
 
     /// Remove a task belonging to the specified hub.
-    fn delete_task(&self, task_id: i32, hub_id: i32) -> RepositoryResult<()> {
+    fn delete_task(&self, task_id: TaskId, hub_id: HubId) -> RepositoryResult<()> {
         use crate::schema::tasks;
 
         let mut conn = self.conn()?;
+        let task_id = i32::from(task_id);
+        let hub_id = i32::from(hub_id);
 
         let target = tasks::table
             .filter(tasks::id.eq(task_id))
@@ -299,13 +315,16 @@ impl TaskWriter for DieselRepository {
     /// Remove an existing assignment snapshot for a task.
     fn remove_assignment(
         &self,
-        task_id: i32,
-        hub_id: i32,
-        assignee_id: i32,
+        task_id: TaskId,
+        hub_id: HubId,
+        assignee_id: UserId,
     ) -> RepositoryResult<()> {
         use crate::schema::task_assignments;
 
         let mut conn = self.conn()?;
+        let task_id = i32::from(task_id);
+        let hub_id = i32::from(hub_id);
+        let assignee_id = i32::from(assignee_id);
 
         let target = task_assignments::table
             .filter(task_assignments::task_id.eq(task_id))
