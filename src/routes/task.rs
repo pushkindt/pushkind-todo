@@ -1,16 +1,14 @@
 //! Routes focused on task-specific views, updates, and modal interactions.
-use std::sync::Arc;
-
 use actix_web::{HttpResponse, Responder, get, post, web};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
-use pushkind_common::zmq::ZmqSender;
 use tera::{Context, Tera};
 
 use crate::forms::task::{QuickTaskStatusForm, TaskCommentForm, UpdateTaskForm};
 use crate::models::config::ServerConfig;
+use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
@@ -93,11 +91,11 @@ pub async fn update_task(
     web::Form(form): web::Form<UpdateTaskForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    zmq_sender: web::Data<Arc<ZmqSender>>,
+    zmq_senders: web::Data<ZmqSenders>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
-    let zmq_sender = zmq_sender.get_ref().as_ref();
-    match task_service::update_task(task_id, form, &user, repo.get_ref(), zmq_sender) {
+    let zmq_senders = zmq_senders.get_ref();
+    match task_service::update_task(task_id, form, &user, repo.get_ref(), &zmq_senders.emailer) {
         Ok(updated_task) => {
             FlashMessage::success("Задача обновлена.").send();
             redirect(&format!("/task/{}", updated_task.id))
@@ -130,12 +128,18 @@ pub async fn quick_update_task_status(
     web::Form(form): web::Form<QuickTaskStatusForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    zmq_sender: web::Data<Arc<ZmqSender>>,
+    zmq_senders: web::Data<ZmqSenders>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
-    let zmq_sender = zmq_sender.get_ref().as_ref();
+    let zmq_senders = zmq_senders.get_ref();
 
-    match task_service::transition_task_status(task_id, form, &user, repo.get_ref(), zmq_sender) {
+    match task_service::transition_task_status(
+        task_id,
+        form,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+    ) {
         Ok(_) => {
             FlashMessage::success("Статус задачи обновлён.").send();
             redirect(&format!("/task/{task_id}"))
@@ -167,12 +171,13 @@ pub async fn add_task_comment(
     web::Form(form): web::Form<TaskCommentForm>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    zmq_sender: web::Data<Arc<ZmqSender>>,
+    zmq_senders: web::Data<ZmqSenders>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
-    let zmq_sender = zmq_sender.get_ref().as_ref();
+    let zmq_senders = zmq_senders.get_ref();
 
-    match task_service::add_task_comment(task_id, form, &user, repo.get_ref(), zmq_sender) {
+    match task_service::add_task_comment(task_id, form, &user, repo.get_ref(), &zmq_senders.emailer)
+    {
         Ok(_) => {
             FlashMessage::success("Комментарий добавлен.").send();
             redirect(&format!("/task/{}", task_id))

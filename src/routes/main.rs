@@ -1,17 +1,15 @@
 //! UI routes handling the main index, task creation, and file upload workflows.
-use std::sync::Arc;
-
 use actix_multipart::form::MultipartForm;
 use actix_web::{HttpResponse, Responder, get, post, web};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
-use pushkind_common::zmq::ZmqSender;
 use tera::Tera;
 
 use crate::dto::main::IndexQuery;
 use crate::forms::main::{AddTaskForm, UploadTasksForm};
+use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, main as main_service};
 
@@ -58,11 +56,11 @@ pub async fn show_index(
 pub async fn add_task(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    zmq_sender: web::Data<Arc<ZmqSender>>,
+    zmq_senders: web::Data<ZmqSenders>,
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
-    let zmq_sender = zmq_sender.get_ref().as_ref();
-    match main_service::add_task(form, &user, repo.get_ref(), zmq_sender) {
+    let zmq_senders = zmq_senders.get_ref();
+    match main_service::add_task(form, &user, repo.get_ref(), &zmq_senders.emailer) {
         Ok(_) => {
             FlashMessage::success("Задача добавлена.").send();
             redirect("/")
