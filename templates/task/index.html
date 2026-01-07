@@ -63,6 +63,10 @@
                         <dd class="col-sm-8">
                             {{ macros::user_popover(user=assignee) }}
                         </dd>
+                        <dt class="col-sm-4">Клиент</dt>
+                        <dd class="col-sm-8">
+                            {{ macros::client_link(client=client) }}
+                        </dd>
                     </dl>
                 </div>
                 <div class="col-md-6">
@@ -185,12 +189,17 @@
 
     document.addEventListener("DOMContentLoaded", () => {
 
-        let tomSelectInstance = null;
+        let userSelectInstance = null;
+        let clientSelectInstance = null;
 
         document.addEventListener("htmx:beforeSwap", function (evt) {
-            if (tomSelectInstance) {
-                tomSelectInstance.destroy();
-                tomSelectInstance = null;
+            if (userSelectInstance) {
+                userSelectInstance.destroy();
+                userSelectInstance = null;
+            }
+            if (clientSelectInstance) {
+                clientSelectInstance.destroy();
+                clientSelectInstance = null;
             }
         });
 
@@ -207,7 +216,7 @@
                 });
             }
 
-            tomSelectInstance = new TomSelect('#user-add-form-id', {
+            userSelectInstance = new TomSelect('#user-add-form-id', {
                 valueField: "email",
                 labelField: "name",
                 searchField: ["name", "email"],
@@ -224,7 +233,31 @@
                     fetch(url, {credentials: 'include'})
                         .then(response => response.json())
                         .then(json => {
-                            console.log(json);
+                            callback(json.slice(0, 20));
+                        }).catch(()=>{
+                            callback();
+                        });
+
+                },
+            });
+
+            clientSelectInstance = new TomSelect('#client-add-form-id', {
+                valueField: "public_id",
+                labelField: "name",
+                searchField: ["name", "email", "phone"],
+                render: {
+                    option: function (item, escape) {
+                        let result = `<div class="border-bottom"><strong>${escape(item.name)} (${escape(item.email || item.phone)})</strong>`;
+                        result += '</div>';
+                        return result
+                    }
+                },
+                load: function(query, callback) {
+
+                    var url = '{{crm_service_url|safe}}/api/v1/clients?page=1&search=' + encodeURIComponent(query);
+                    fetch(url, {credentials: 'include'})
+                        .then(response => response.json())
+                        .then(json => {
                             callback(json.slice(0, 20));
                         }).catch(()=>{
                             callback();
@@ -243,6 +276,20 @@
                     nameInput.value = selected.text;
                 } else {
                     emailInput.value = "";
+                    nameInput.value = "";
+                }
+            });
+
+            document.getElementById("client-add-form-id").addEventListener("change", function() {
+                const publicIdInput = document.getElementById("client-public-id");
+                const nameInput = document.getElementById("client-name");
+                const selected = this.options[this.selectedIndex];
+
+                if (selected) {
+                    publicIdInput.value = selected.value;
+                    nameInput.value = selected.text;
+                } else {
+                    publicIdInput.value = "";
                     nameInput.value = "";
                 }
             });

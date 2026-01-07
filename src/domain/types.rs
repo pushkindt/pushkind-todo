@@ -35,7 +35,8 @@ pub enum TypeConstraintError {
 
 /// Macro to generate lightweight newtypes for positive identifiers.
 macro_rules! id_newtype {
-    ($name:ident) => {
+    ($name:ident, $doc:expr) => {
+        #[doc = $doc]
         #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
         pub struct $name(i32);
 
@@ -77,10 +78,11 @@ macro_rules! id_newtype {
     };
 }
 
-id_newtype!(UserId);
-id_newtype!(HubId);
-id_newtype!(TaskId);
-id_newtype!(TaskEventId);
+id_newtype!(UserId, "Unique identifier for a user.");
+id_newtype!(HubId, "Unique identifier for a hub.");
+id_newtype!(TaskId, "Unique identifier for a task.");
+id_newtype!(TaskEventId, "Unique identifier for a task event.");
+id_newtype!(ClientId, "Unique identifier for a customer.");
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 /// Lower-cased and validated email address.
@@ -89,12 +91,8 @@ pub struct UserEmail(String);
 impl UserEmail {
     /// Validates and normalizes an email string.
     pub fn new<S: Into<String>>(email: S) -> Result<Self, TypeConstraintError> {
-        let normalized = email.into().trim().to_lowercase();
-        if normalized.validate_email() {
-            Ok(Self(normalized))
-        } else {
-            Err(TypeConstraintError::InvalidEmail)
-        }
+        let normalized = normalize_email(email)?;
+        Ok(Self(normalized))
     }
 
     /// Borrow the email as a `&str`.
@@ -257,6 +255,16 @@ non_empty_string_newtype!(TaskTitle, "Task title wrapper enforcing non-empty val
 
 non_empty_string_newtype!(TaskTrack, "Task track wrapper enforcing non-empty values.");
 
+non_empty_string_newtype!(
+    ClientName,
+    "Customer name wrapper enforcing non-empty values."
+);
+
+non_empty_string_newtype!(
+    PublicId,
+    "Customer name wrapper enforcing non-empty values."
+);
+
 macro_rules! html_string_newtype {
     ($name:ident, $doc:expr) => {
         #[doc = $doc]
@@ -302,3 +310,13 @@ html_string_newtype!(
     TaskComment,
     "Task comment wrapper for optional HTML content."
 );
+
+/// Normalizes and validates an email string.
+fn normalize_email<S: Into<String>>(email: S) -> Result<String, TypeConstraintError> {
+    let normalized = email.into().trim().to_lowercase();
+    if normalized.validate_email() {
+        Ok(normalized)
+    } else {
+        Err(TypeConstraintError::InvalidEmail)
+    }
+}

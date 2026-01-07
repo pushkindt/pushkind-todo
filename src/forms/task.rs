@@ -5,10 +5,11 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::domain::{
+    client::NewClient,
     task::{TaskPriority, TaskStatus},
     types::{
-        HubId, TaskComment, TaskDescription, TaskTitle, TaskTrack, TypeConstraintError, UserEmail,
-        UserName,
+        ClientName, HubId, PublicId, TaskComment, TaskDescription, TaskTitle, TaskTrack,
+        TypeConstraintError, UserEmail, UserName,
     },
     user::NewUser,
 };
@@ -36,6 +37,9 @@ pub struct UpdateTaskForm {
     /// Assignee data captured by the modal.
     #[serde(flatten, default)]
     pub assignee: AssigneeSelectionForm,
+    /// Client data captured by the modal.
+    #[serde(flatten, default)]
+    pub client: ClientSelectionForm,
 }
 
 #[derive(Debug, Default, Deserialize, Validate)]
@@ -46,6 +50,16 @@ pub struct AssigneeSelectionForm {
     #[validate(email)]
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub email: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Validate)]
+pub struct ClientSelectionForm {
+    #[validate(length(min = 1))]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub client_name: Option<String>,
+    #[validate(length(min = 1))]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub client_public_id: Option<String>,
 }
 
 /// Normalized data constructed from the update task form submission.
@@ -65,6 +79,8 @@ pub struct UpdateTaskPayload {
     pub due_date: Option<NaiveDate>,
     /// Optional assignee selected in the form.
     pub assignee: Option<AssigneeSelectionPayload>,
+    /// Optional assignee selected in the form.
+    pub client: Option<ClientSelectionPayload>,
 }
 
 /// User data captured by the modal when assigning a task.
@@ -74,6 +90,15 @@ pub struct AssigneeSelectionPayload {
     pub name: UserName,
     /// Email address for the selected user.
     pub email: UserEmail,
+}
+
+/// Client data captured by the modal when assigning a task.
+#[derive(Debug, Clone)]
+pub struct ClientSelectionPayload {
+    /// Display name for the selected user.
+    pub name: ClientName,
+    /// Email address for the selected user.
+    pub public_id: PublicId,
 }
 
 /// Form payload submitted when leaving a new comment on a task.
@@ -156,6 +181,7 @@ impl TryFrom<UpdateTaskForm> for UpdateTaskPayload {
             track,
             priority,
             assignee,
+            client,
         } = form;
 
         Ok(Self {
@@ -176,6 +202,7 @@ impl TryFrom<UpdateTaskForm> for UpdateTaskPayload {
                 .transpose()
                 .map_err(|_| FormError::InvalidDueDate)?,
             assignee: assignee.try_into()?,
+            client: client.try_into()?,
         })
     }
 }
@@ -198,6 +225,31 @@ impl TryFrom<AssigneeSelectionForm> for Option<AssigneeSelectionPayload> {
             (Some(name), Some(email)) => Ok(Some(AssigneeSelectionPayload {
                 name: UserName::new(name).map_err(|_| FormError::InvalidAssigneeName)?,
                 email: UserEmail::new(email).map_err(|_| FormError::InvalidAssigneeEmail)?,
+            })),
+            _ => Ok(None),
+        }
+    }
+}
+
+impl ClientSelectionPayload {
+    /// Convert the selection into a new user payload.
+    pub fn into_domain(self, hub_id: HubId) -> Result<NewClient, TypeConstraintError> {
+        let name = ClientName::new(self.name)?;
+        let public_id = PublicId::new(self.public_id)?;
+
+        Ok(NewClient::new(hub_id, name, public_id))
+    }
+}
+
+impl TryFrom<ClientSelectionForm> for Option<ClientSelectionPayload> {
+    type Error = FormError;
+    fn try_from(form: ClientSelectionForm) -> Result<Self, Self::Error> {
+        form.validate().map_err(FormError::Validation)?;
+        match (form.client_name, form.client_public_id) {
+            (Some(name), Some(public_id)) => Ok(Some(ClientSelectionPayload {
+                name: ClientName::new(name).map_err(|_| FormError::InvalidClientName)?,
+                public_id: PublicId::new(public_id)
+                    .map_err(|_| FormError::InvalidClientPublicId)?,
             })),
             _ => Ok(None),
         }

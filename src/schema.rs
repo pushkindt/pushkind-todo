@@ -1,5 +1,15 @@
-//! Diesel schema definitions for the todo database tables.
 // @generated automatically by Diesel CLI.
+
+diesel::table! {
+    clients (id) {
+        id -> Integer,
+        public_id -> Text,
+        hub_id -> Integer,
+        name -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
 
 diesel::table! {
     task_assignments (id) {
@@ -37,6 +47,7 @@ diesel::table! {
         completed_at -> Nullable<Timestamp>,
         track -> Nullable<Text>,
         priority -> Text,
+        client_id -> Nullable<Integer>,
     }
 }
 
@@ -56,5 +67,6 @@ diesel::joinable!(task_assignments -> tasks (task_id));
 diesel::joinable!(task_assignments -> users (assignee_id));
 diesel::joinable!(task_events -> tasks (task_id));
 diesel::joinable!(task_events -> users (user_id));
+diesel::joinable!(tasks -> clients (client_id));
 
-diesel::allow_tables_to_appear_in_same_query!(task_assignments, task_events, tasks, users,);
+diesel::allow_tables_to_appear_in_same_query!(clients, task_assignments, task_events, tasks, users,);

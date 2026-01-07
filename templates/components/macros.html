@@ -103,6 +103,8 @@
         Приоритет
     {% elif key == 'track' %}
         Трек
+    {% elif key == 'client' or key == 'client_id' %}
+        Клиент
     {% else %}
         {{ key | replace(from="_", to=" ") | capitalize }}
     {% endif %}
@@ -340,3 +342,36 @@
         </div>
     </div>
 {% endmacro task_assignee %}
+
+{% macro client_link(client) %}
+    {% if client %}
+        <a href="{{crm_service_url|safe}}/?public_id={{ client.public_id }}">{{ client.name }}</a>
+    {% else %}
+        <span class="text-muted">—</span>
+    {% endif %}
+{% endmacro client_link %}
+
+{% macro task_client(client) %}
+    <div class="row mb-3">
+        <label for="client-add-form-id" class="col-md-2 col-form-label">Клиент</label>
+        <div class="col-md-10">
+            <select class="form-select my-1" id="client-add-form-id" placeholder="Поиск клиента">
+                {% if client %}
+                    <option value="{{ client.public_id }}" selected>{{ client.name }}</option>
+                {% endif %}
+            </select>
+            <div class="form-text">
+                {% if client %}
+                    <input type="hidden" id="client-name" name="client_name" required value="{{ client.name }}">
+                    <input type="hidden" id="client-public-id" name="client_public_id" required value="{{ client.public_id }}">
+                    Текущий исполнитель: {{ client.name }}.
+                    Очистите поле, чтобы снять назначение.
+                {% else %}
+                    <input type="hidden" id="client-name" name="client_name" required>
+                    <input type="hidden" id="client-public-id" name="client_public_id" required>
+                    Укажите идентификатор пользователя, чтобы назначить задачу, или оставьте пустым.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endmacro task_client %}

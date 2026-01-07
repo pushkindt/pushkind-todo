@@ -9,11 +9,11 @@ use std::collections::HashMap;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
-use crate::domain::types::{HubId, TaskTrack, UserId};
+use crate::domain::types::{ClientId, HubId, TaskTrack, UserId};
 use crate::domain::user::{NewUser, User};
 use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
 use crate::repository::{
-    TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
+    ClientReader, TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
 use crate::services::{ServiceError, ServiceResult};
 
@@ -27,7 +27,7 @@ pub fn load_index_page<R>(
     repo: &R,
 ) -> ServiceResult<IndexPageData>
 where
-    R: TaskReader + UserReader + UserWriter + ?Sized,
+    R: TaskReader + UserReader + UserWriter + ClientReader + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -37,6 +37,7 @@ where
         status,
         track,
         assignee,
+        client,
         priority,
         updated_after,
         updated_before,
@@ -85,6 +86,14 @@ where
     {
         list_query.filters_mut().assignee_id = Some(user_id);
         assignee_filter = Some(user_id);
+    }
+
+    let mut client_filter = None;
+    if let Some(client_id) = client
+        && let Ok(client_id) = ClientId::new(client_id)
+    {
+        list_query.filters_mut().client_id = Some(client_id);
+        client_filter = Some(client_id);
     }
 
     let mut updated_after_filter = None;
@@ -154,9 +163,12 @@ where
         priority: priority_filter,
         updated_after: updated_after_filter,
         updated_before: updated_before_filter,
+        client: client_filter,
     };
 
     let tracks = repo.list_task_tracks(user.hub_id)?;
+
+    let clients = repo.list_clients(user.hub_id)?;
 
     Ok(IndexPageData {
         tasks,
@@ -164,6 +176,7 @@ where
         users,
         recently_updated_task_ids,
         tracks,
+        clients,
     })
 }
 
@@ -339,6 +352,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::SERVICE_ACCESS_ROLE;
+    use crate::domain::client;
     use crate::domain::task::{
         NewTask as DomainNewTask, Task, TaskAssignment as DomainTaskAssignment, TaskPriority,
         TaskStatus, UpdateTask as DomainUpdateTask,
@@ -348,8 +362,10 @@ mod tests {
     };
     use crate::domain::user::{UpdateUser, User};
     use crate::forms::task::AssigneeSelectionForm;
-    use crate::repository::mock::{MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter};
-    use crate::repository::{TaskWriter, UserListQuery, UserReader, UserWriter};
+    use crate::repository::mock::{
+        MockClientReader, MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter,
+    };
+    use crate::repository::{ClientReader, TaskWriter, UserListQuery, UserReader, UserWriter};
     use crate::services::mock::MockZmqSender;
 
     use std::io::Write;
@@ -377,6 +393,7 @@ mod tests {
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
+            client_id: None,
         }
     }
 
@@ -437,6 +454,7 @@ mod tests {
 
     struct TaskReaderUserRepo {
         pub task_reader: MockTaskReader,
+        pub client_reader: MockClientReader,
         pub user_reader: MockUserReader,
         pub user_writer: MockUserWriter,
     }
@@ -445,6 +463,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 task_reader: MockTaskReader::new(),
+                client_reader: MockClientReader::new(),
                 user_reader: MockUserReader::new(),
                 user_writer: MockUserWriter::new(),
             }
@@ -506,6 +525,23 @@ mod tests {
             query: UserListQuery,
         ) -> pushkind_common::repository::errors::RepositoryResult<(usize, Vec<User>)> {
             self.user_reader.list_users(query)
+        }
+    }
+
+    impl ClientReader for TaskReaderUserRepo {
+        fn get_client_by_id(
+            &self,
+            id: ClientId,
+            hub_id: HubId,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Option<client::Client>> {
+            self.client_reader.get_client_by_id(id, hub_id)
+        }
+
+        fn list_clients(
+            &self,
+            hub_id: HubId,
+        ) -> pushkind_common::repository::errors::RepositoryResult<Vec<client::Client>> {
+            self.client_reader.list_clients(hub_id)
         }
     }
 
@@ -798,6 +834,14 @@ mod tests {
                 }
             });
 
+        repo.client_reader
+            .expect_list_clients()
+            .times(1)
+            .returning(move |hub_id| {
+                assert_eq!(hub_id, HubId::new(expected_hub).unwrap());
+                Ok(Vec::new())
+            });
+
         let result = load_index_page(query, &user, &repo);
 
         let data = match result {
@@ -855,6 +899,7 @@ mod tests {
             priority: Some("High".to_string()),
             updated_after: Some("2024-05-01".to_string()),
             updated_before: Some("2024-05-31".to_string()),
+            client: None,
         };
 
         let expected_email = user.email.clone();
@@ -966,6 +1011,14 @@ mod tests {
                 }
             });
 
+        repo.client_reader
+            .expect_list_clients()
+            .times(1)
+            .returning(move |hub_id| {
+                assert_eq!(hub_id, HubId::new(expected_hub_id).unwrap());
+                Ok(Vec::new())
+            });
+
         let result = load_index_page(query, &user, &repo).expect("expected success");
         assert_eq!(result.filters.status, Some(TaskStatus::Completed));
         assert_eq!(
@@ -1063,6 +1116,14 @@ mod tests {
                     assert_eq!(hub_id, HubId::new(expected_hub_id).unwrap());
                     Ok(Vec::new())
                 }
+            });
+
+        repo.client_reader
+            .expect_list_clients()
+            .times(1)
+            .returning(move |hub_id| {
+                assert_eq!(hub_id, HubId::new(expected_hub_id).unwrap());
+                Ok(Vec::new())
             });
 
         let result = load_index_page(query, &user, &repo).expect("expected success");
@@ -1376,6 +1437,7 @@ mod tests {
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
+            client_id: None,
         };
 
         repo.task_writer.expect_create_task().times(1).returning({

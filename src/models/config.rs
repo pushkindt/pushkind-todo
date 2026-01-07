@@ -13,4 +13,5 @@ pub struct ServerConfig {
     pub templates_dir: String,
     pub secret: String,
     pub auth_service_url: String,
+    pub crm_service_url: String,
 }

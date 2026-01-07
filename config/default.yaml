@@ -6,3 +6,4 @@ zmq_emailer_pub: tcp://127.0.0.1:5557
 templates_dir: templates/**/*
 secret: env::APP_SECRET
 auth_service_url: ""
+crm_service_url: ""

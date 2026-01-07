@@ -1,14 +1,15 @@
 //! Diesel task models and conversions that map the database schema to domain types.
 use chrono::{NaiveDate, NaiveDateTime};
 use diesel::prelude::*;
-use thiserror::Error;
 
 use crate::domain::{
     task::{
         NewTask as DomainNewTask, Task as DomainTask, TaskAssignment as DomainTaskAssignment,
         TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
     },
-    types::{HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserId},
+    types::{
+        ClientId, HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, TypeConstraintError, UserId,
+    },
 };
 
 use super::user::User;
@@ -30,6 +31,7 @@ pub struct Task {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub completed_at: Option<NaiveDateTime>,
+    pub client_id: Option<i32>,
 }
 
 #[derive(Debug, Insertable)]
@@ -47,6 +49,7 @@ pub struct NewTask<'a> {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub completed_at: Option<NaiveDateTime>,
+    pub client_id: Option<i32>,
 }
 
 #[derive(Debug, AsChangeset)]
@@ -62,6 +65,7 @@ pub struct UpdateTask<'a> {
     pub assigned_to: Option<i32>,
     pub completed_at: Option<NaiveDateTime>,
     pub updated_at: NaiveDateTime,
+    pub client_id: Option<i32>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Selectable, Associations)]
@@ -85,18 +89,8 @@ pub struct NewTaskAssignment {
     pub assigned_at: NaiveDateTime,
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum TaskModelError {
-    #[error("Unknown task status '{status}'")]
-    UnknownStatus { status: String },
-    #[error("Unknown task priority '{priority}'")]
-    UnknownPriority { priority: String },
-    #[error("Invalid type constraint: {0}")]
-    TypeConstraint(#[from] crate::domain::types::TypeConstraintError),
-}
-
 impl TryFrom<Task> for DomainTask {
-    type Error = crate::domain::types::TypeConstraintError;
+    type Error = TypeConstraintError;
 
     fn try_from(value: Task) -> Result<Self, Self::Error> {
         let Task {
@@ -113,6 +107,7 @@ impl TryFrom<Task> for DomainTask {
             created_at,
             updated_at,
             completed_at,
+            client_id,
         } = value;
 
         let status = TaskStatus::try_from(status_text.as_str())?;
@@ -142,56 +137,7 @@ impl TryFrom<Task> for DomainTask {
             created_at,
             updated_at,
             completed_at,
-        })
-    }
-}
-
-impl Task {
-    pub fn try_into_domain(self) -> Result<DomainTask, TaskModelError> {
-        let Self {
-            id,
-            hub_id,
-            title,
-            description,
-            track,
-            status: raw_status,
-            priority: raw_priority,
-            due_date,
-            assigned_to,
-            author_id,
-            created_at,
-            updated_at,
-            completed_at,
-        } = self;
-
-        let status = TaskStatus::try_from(raw_status.as_str())?;
-        let canonical: &'static str = status.into();
-        if canonical != raw_status.as_str() {
-            return Err(TaskModelError::UnknownStatus { status: raw_status });
-        }
-
-        let priority = TaskPriority::try_from(raw_priority.as_str())?;
-        let canonical_priority: &'static str = priority.into();
-        if canonical_priority != raw_priority.as_str() {
-            return Err(TaskModelError::UnknownPriority {
-                priority: raw_priority,
-            });
-        }
-
-        Ok(DomainTask {
-            id: TaskId::new(id)?,
-            hub_id: HubId::new(hub_id)?,
-            title: TaskTitle::new(title)?,
-            description: description.map(TaskDescription::new).transpose()?,
-            track: track.map(TaskTrack::new).transpose()?,
-            priority,
-            status,
-            due_date,
-            assigned_to: assigned_to.map(UserId::new).transpose()?,
-            author_id: UserId::new(author_id)?,
-            created_at,
-            updated_at,
-            completed_at,
+            client_id: client_id.map(ClientId::new).transpose()?,
         })
     }
 }
@@ -211,6 +157,7 @@ impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
             created_at: value.created_at,
             updated_at: value.updated_at,
             completed_at: None,
+            client_id: value.client_id.map(|id| id.get()),
         }
     }
 }
@@ -227,6 +174,7 @@ impl<'a> From<&'a DomainUpdateTask> for UpdateTask<'a> {
             assigned_to: value.assigned_to.map(|id| id.get()),
             completed_at: value.completed_at,
             updated_at: value.updated_at,
+            client_id: value.client_id.map(|id| id.get()),
         }
     }
 }
