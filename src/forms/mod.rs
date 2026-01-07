@@ -35,4 +35,8 @@ pub enum FormError {
     InvalidAssignSelf,
     #[error("invalid csv file")]
     InvalidCsv,
+    #[error("invalid task client name")]
+    InvalidClientName,
+    #[error("invalid task client public id")]
+    InvalidClientPublicId,
 }

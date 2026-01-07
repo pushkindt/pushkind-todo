@@ -3,13 +3,15 @@ use pushkind_common::db::{DbConnection, DbPool};
 use pushkind_common::pagination::Pagination;
 use pushkind_common::repository::errors::RepositoryResult;
 
-use crate::domain::types::{HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId};
+use crate::domain::client::{Client, NewClient};
+use crate::domain::types::{ClientId, HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId};
 use crate::domain::{
     task::{NewTask, Task, TaskAssignment, TaskListFilters, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent},
     user::{NewUser, UpdateUser, User},
 };
 
+pub mod client;
 pub mod task;
 pub mod task_event;
 pub mod user;
@@ -126,6 +128,18 @@ pub trait UserWriter {
     fn delete_user(&self, user_id: UserId, hub_id: HubId) -> RepositoryResult<()>;
     /// Touch the user's `visited_at` timestamp.
     fn touch_visited_at(&self, user_id: UserId, hub_id: HubId) -> RepositoryResult<()>;
+}
+
+pub trait ClientReader {
+    /// Get a client by identifier within the hub.
+    fn get_client_by_id(&self, id: ClientId, hub_id: HubId) -> RepositoryResult<Option<Client>>;
+    /// List clients for the given hub.
+    fn list_clients(&self, hub_id: HubId) -> RepositoryResult<Vec<Client>>;
+}
+
+pub trait ClientWriter {
+    /// Create or update a client record keyed by public id within the hub.
+    fn create_or_update_client(&self, new_client: &NewClient) -> RepositoryResult<Client>;
 }
 
 /// Read-only operations over task records.

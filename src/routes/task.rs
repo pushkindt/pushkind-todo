@@ -10,6 +10,7 @@ use pushkind_common::zmq::ZmqSender;
 use tera::{Context, Tera};
 
 use crate::forms::task::{QuickTaskStatusForm, TaskCommentForm, UpdateTaskForm};
+use crate::models::config::ServerConfig;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
@@ -20,7 +21,8 @@ pub async fn show_task(
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
     flash_messages: IncomingFlashMessages,
-    server_config: web::Data<CommonServerConfig>,
+    server_config: web::Data<ServerConfig>,
+    common_config: web::Data<CommonServerConfig>,
     tera: web::Data<Tera>,
 ) -> impl Responder {
     let task_id = task_id.into_inner();
@@ -31,12 +33,14 @@ pub async fn show_task(
                 &flash_messages,
                 &user,
                 "task",
-                &server_config.auth_service_url,
+                &common_config.auth_service_url,
             );
             context.insert("task", &details.task);
             context.insert("author", &details.author);
             context.insert("assignee", &details.assignee);
+            context.insert("client", &details.client);
             context.insert("events", &details.events);
+            context.insert("crm_service_url", &server_config.crm_service_url);
             render_template(&tera, "task/index.html", &context)
         }
         Err(ServiceError::Unauthorized) => {
@@ -64,8 +68,8 @@ pub async fn task_modal(
         Ok(data) => {
             let mut context = Context::new();
             context.insert("task", &data.task);
-            context.insert("users", &data.users);
             context.insert("assignee", &data.assignee);
+            context.insert("client", &data.client);
             context.insert("home_url", &server_config.auth_service_url);
             context.insert("tracks", &data.tracks);
             render_template(&tera, "task/modal_body.html", &context)
@@ -107,6 +111,7 @@ pub async fn update_task(
             redirect("/")
         }
         Err(ServiceError::Form(message)) => {
+            log::info!("Form error updating task {task_id}: {message}");
             FlashMessage::error(message).send();
             redirect(&format!("/task/{task_id}"))
         }

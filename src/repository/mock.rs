@@ -2,13 +2,14 @@
 use mockall::mock;
 
 use super::{
-    TaskEventReader, TaskEventWriter, TaskListQuery, TaskReader, TaskWriter, UserListQuery,
-    UserReader, UserWriter,
+    ClientReader, ClientWriter, TaskEventReader, TaskEventWriter, TaskListQuery, TaskReader,
+    TaskWriter, UserListQuery, UserReader, UserWriter,
 };
 use crate::domain::{
+    client::{Client, NewClient},
     task::{NewTask, Task, TaskAssignment, UpdateTask},
     task_event::{NewTaskEvent, TaskEvent},
-    types::{HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId},
+    types::{ClientId, HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId},
     user::{NewUser, UpdateUser, User},
 };
 use pushkind_common::repository::errors::RepositoryResult;
@@ -90,5 +91,22 @@ mock! {
         fn record_event(&self, event: &NewTaskEvent) -> RepositoryResult<TaskEvent>;
         /// Mocked event deletion.
         fn delete_event(&self, id: TaskEventId, hub_id: HubId) -> RepositoryResult<()>;
+    }
+}
+
+mock! {
+    pub ClientReader {}
+
+    impl ClientReader for ClientReader {
+        fn get_client_by_id(&self, id: ClientId, hub_id: HubId) -> RepositoryResult<Option<Client>>;
+        fn list_clients(&self, hub_id: HubId) -> RepositoryResult<Vec<Client>>;
+    }
+}
+
+mock! {
+    pub ClientWriter {}
+
+    impl ClientWriter for ClientWriter {
+        fn create_or_update_client(&self, new_client: &NewClient) -> RepositoryResult<Client>;
     }
 }

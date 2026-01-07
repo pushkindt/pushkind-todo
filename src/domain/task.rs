@@ -2,6 +2,8 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::types::ClientId;
+
 use super::types::{
     HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, TypeConstraintError, UserId,
 };
@@ -92,6 +94,8 @@ pub struct Task {
     pub updated_at: NaiveDateTime,
     /// When the task was completed, if it has been finished.
     pub completed_at: Option<NaiveDateTime>,
+    /// Optional client the task is associated with.
+    pub client_id: Option<ClientId>,
 }
 
 impl Task {
@@ -126,6 +130,8 @@ pub struct NewTask {
     pub created_at: NaiveDateTime,
     /// Update timestamp captured at the moment of building the payload.
     pub updated_at: NaiveDateTime,
+    /// Optional client the task is associated with.
+    pub client_id: Option<ClientId>,
 }
 
 impl NewTask {
@@ -144,6 +150,7 @@ impl NewTask {
             author_id,
             created_at: now,
             updated_at: now,
+            client_id: None,
         }
     }
 
@@ -198,6 +205,12 @@ impl NewTask {
     /// Assign the task to a specific user during creation.
     pub fn assign_to(mut self, assignee_id: UserId) -> Self {
         self.assigned_to = Some(assignee_id);
+        self
+    }
+
+    /// Associate the task with a specific client.
+    pub fn client_id(mut self, client_id: ClientId) -> Self {
+        self.client_id = Some(client_id);
         self
     }
 }
@@ -260,6 +273,8 @@ pub struct TaskListFilters {
     pub hub_id: HubId,
     /// Optional filter to only return tasks assigned to a user.
     pub assignee_id: Option<UserId>,
+    /// Optional filter to only return tasks associated with a client.
+    pub client_id: Option<ClientId>,
     /// Optional filter restricting tasks to a specific track.
     pub track: Option<TaskTrack>,
     /// Optional filter to limit results to a specific status.
@@ -286,6 +301,7 @@ impl TaskListFilters {
         Self {
             hub_id,
             assignee_id: None,
+            client_id: None,
             track: None,
             status: None,
             priority: None,
@@ -301,6 +317,12 @@ impl TaskListFilters {
     /// Restrict the results to a specific assignee.
     pub fn for_assignee(mut self, assignee_id: UserId) -> Self {
         self.assignee_id = Some(assignee_id);
+        self
+    }
+
+    /// Restrict the results to a specific assignee.
+    pub fn for_client(mut self, client_id: ClientId) -> Self {
+        self.client_id = Some(client_id);
         self
     }
 
@@ -380,6 +402,8 @@ pub struct UpdateTask {
     pub completed_at: Option<NaiveDateTime>,
     /// Timestamp when the update payload was constructed.
     pub updated_at: NaiveDateTime,
+    /// Optional client the task is associated with.
+    pub client_id: Option<ClientId>,
 }
 
 impl UpdateTask {
@@ -395,6 +419,7 @@ impl UpdateTask {
             assigned_to: task.assigned_to,
             completed_at: task.completed_at,
             updated_at: chrono::Local::now().naive_utc(),
+            client_id: task.client_id,
         }
     }
 
@@ -490,6 +515,20 @@ impl UpdateTask {
     pub fn clear_completed_at(mut self) -> Self {
         self.touch();
         self.completed_at = None;
+        self
+    }
+
+    /// Associate the task with a specific client.
+    pub fn client_id(mut self, client_id: ClientId) -> Self {
+        self.touch();
+        self.client_id = Some(client_id);
+        self
+    }
+
+    /// Disassociate the task from any client.
+    pub fn clear_client_id(mut self) -> Self {
+        self.touch();
+        self.client_id = None;
         self
     }
 }

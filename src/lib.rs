@@ -95,6 +95,7 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
             )
             .app_data(web::Data::new(tera.clone()))
             .app_data(web::Data::new(repo.clone()))
+            .app_data(web::Data::new(server_config.clone()))
             .app_data(web::Data::new(common_config.clone()))
             .app_data(web::Data::new(zmq_sender.clone()))
     })

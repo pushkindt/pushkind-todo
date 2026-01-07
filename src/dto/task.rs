@@ -1,5 +1,7 @@
 //! DTO structs for task details, events, and modal payloads returned to handlers.
-use crate::domain::{task::Task, task_event::TaskEvent, types::TaskTrack, user::User};
+use crate::domain::{
+    client::Client, task::Task, task_event::TaskEvent, types::TaskTrack, user::User,
+};
 use serde::Serialize;
 
 /// Task event accompanied by the optional author information.
@@ -20,6 +22,8 @@ pub struct TaskDetails {
     pub author: User,
     /// Task assignee when available in the current hub.
     pub assignee: Option<User>,
+    /// Task client when available in the current hub.
+    pub client: Option<Client>,
     /// Ordered list of events associated with the task.
     pub events: Vec<TaskEventWithAuthor>,
 }
@@ -31,8 +35,8 @@ pub struct TaskModalData {
     pub task: Task,
     /// Optional assignee for the task when available in the current hub.
     pub assignee: Option<User>,
-    /// Users that can be selected as potential assignees.
-    pub users: Vec<User>,
+    /// Optional client for the task when available in the current hub.
+    pub client: Option<Client>,
     /// Available task tracks to use for hints
     pub tracks: Vec<TaskTrack>,
 }

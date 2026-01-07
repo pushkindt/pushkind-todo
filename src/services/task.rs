@@ -10,7 +10,7 @@ use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
 
 use crate::SERVICE_ACCESS_ROLE;
-use crate::domain::types::{HubId, TaskId};
+use crate::domain::types::{ClientId, HubId, TaskId};
 use crate::domain::user::NewUser;
 use crate::domain::{
     task::{Task, TaskStatus, UpdateTask},
@@ -23,7 +23,8 @@ use crate::forms::task::{
     UpdateTaskForm, UpdateTaskPayload,
 };
 use crate::repository::{
-    TaskEventReader, TaskEventWriter, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
+    ClientReader, ClientWriter, TaskEventReader, TaskEventWriter, TaskReader, TaskWriter,
+    UserReader, UserWriter,
 };
 use crate::services::{ServiceError, ServiceResult};
 use serde_json::{Value, json};
@@ -38,7 +39,7 @@ pub fn load_task_details<R>(
     repo: &R,
 ) -> ServiceResult<TaskDetails>
 where
-    R: TaskReader + TaskEventReader + UserReader + ?Sized,
+    R: TaskReader + TaskEventReader + UserReader + ClientReader + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -62,6 +63,13 @@ where
     let assignee = match task.assigned_to {
         Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(user) => user,
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
+    let client = match task.client_id {
+        Some(client_id) => match repo.get_client_by_id(client_id, hub_id) {
+            Ok(client) => client,
             Err(err) => return Err(ServiceError::from(err)),
         },
         None => None,
@@ -100,6 +108,7 @@ where
         author,
         assignee,
         events,
+        client,
     })
 }
 
@@ -110,7 +119,7 @@ pub fn load_task_modal<R>(
     repo: &R,
 ) -> ServiceResult<TaskModalData>
 where
-    R: TaskReader + UserReader + ?Sized,
+    R: TaskReader + UserReader + ClientReader + ?Sized,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -124,29 +133,26 @@ where
     let assignee = match task.assigned_to {
         Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
             Ok(Some(user)) => Some(user),
-            Ok(None) => {
-                log::warn!(
-                    "Task {} references missing assignee {} in hub {}",
-                    task.id,
-                    assignee_id,
-                    user.hub_id
-                );
-                None
-            }
+            Ok(None) => None,
             Err(err) => return Err(ServiceError::from(err)),
         },
         None => None,
     };
-
-    let (_total, users) = repo.list_users(UserListQuery::new(hub_id))?;
+    let client = match task.client_id {
+        Some(client_id) => match repo.get_client_by_id(client_id, hub_id) {
+            Ok(client) => client,
+            Err(err) => return Err(ServiceError::from(err)),
+        },
+        None => None,
+    };
 
     let tracks = repo.list_task_tracks(hub_id)?;
 
     Ok(TaskModalData {
         task,
         assignee,
-        users,
         tracks,
+        client,
     })
 }
 
@@ -165,12 +171,18 @@ where
         + TaskEventWriter
         + UserReader
         + UserWriter
+        + ClientReader
+        + ClientWriter
         + ?Sized,
     Z: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
+    log::info!("Updating task {task_id} with form: {:?}", form);
+
     let submission = UpdateTaskPayload::try_from(form)?;
+
+    log::info!("Updating task {task_id} with payload: {:?}", submission);
 
     let hub_id = HubId::new(user.hub_id)?;
     let task_id = TaskId::new(task_id)?;
@@ -183,6 +195,7 @@ where
         status,
         due_date,
         assignee,
+        client,
     } = submission;
 
     let current_task = repo
@@ -193,6 +206,14 @@ where
         Some(assignee) => {
             let new_user = assignee.into_domain(hub_id)?;
             Some(repo.create_or_update_user(&new_user)?)
+        }
+        None => None,
+    };
+
+    let client = match client {
+        Some(client) => {
+            let new_client = client.into_domain(hub_id)?;
+            Some(repo.create_or_update_client(&new_client)?)
         }
         None => None,
     };
@@ -223,6 +244,12 @@ where
         assignee_user.as_ref().map(|user| user.id),
     );
 
+    let updates = apply_client_updates(
+        updates,
+        current_task.client_id,
+        client.as_ref().map(|client| client.id),
+    );
+
     let updated = repo.update_task(task_id, hub_id, &updates)?;
 
     let status_event_data = status_event_payload(current_task.status, updated.status);
@@ -243,7 +270,55 @@ where
         None
     };
 
-    let metadata_event_data = metadata_event_payload(&current_task, &updated);
+    let (previous_client_name, updated_client_name) = if current_task.client_id != updated.client_id
+    {
+        let previous_client_name = match current_task.client_id {
+            Some(client_id) => match repo.get_client_by_id(client_id, hub_id)? {
+                Some(client) => Some(client.name.as_str().to_string()),
+                None => {
+                    log::warn!(
+                        "Task {} references missing previous client {}",
+                        current_task.id,
+                        client_id
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let updated_client_name = match updated.client_id {
+            Some(client_id) => {
+                if let Some(client) = client.as_ref().filter(|client| client.id == client_id) {
+                    Some(client.name.as_str().to_string())
+                } else {
+                    match repo.get_client_by_id(client_id, hub_id)? {
+                        Some(client) => Some(client.name.as_str().to_string()),
+                        None => {
+                            log::warn!(
+                                "Task {} references missing updated client {}",
+                                updated.id,
+                                client_id
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+            None => None,
+        };
+
+        (previous_client_name, updated_client_name)
+    } else {
+        (None, None)
+    };
+
+    let metadata_event_data = metadata_event_payload(
+        &current_task,
+        &updated,
+        previous_client_name,
+        updated_client_name,
+    );
 
     if status_event_data.is_some()
         || assignment_event_data.is_some()
@@ -511,6 +586,20 @@ fn apply_assignment_updates(
     }
 }
 
+/// Adjust the update payload to reflect new client association decisions.
+fn apply_client_updates(
+    updates: UpdateTask,
+    current_client_id: Option<ClientId>,
+    new_client_id: Option<ClientId>,
+) -> UpdateTask {
+    match new_client_id {
+        Some(client_id) if current_client_id != Some(client_id) => updates.client_id(client_id),
+        Some(_) => updates,
+        None if current_client_id.is_some() => updates.clear_client_id(),
+        None => updates,
+    }
+}
+
 /// Generate event data when a task status transitions.
 fn status_event_payload(current: TaskStatus, updated: TaskStatus) -> Option<Value> {
     if current == updated {
@@ -544,7 +633,12 @@ fn assignment_event_payload(
 }
 
 /// Compute metadata diffs for task update events.
-fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
+fn metadata_event_payload(
+    current: &Task,
+    updated: &Task,
+    previous_client_name: Option<String>,
+    updated_client_name: Option<String>,
+) -> Option<Value> {
     let mut changes = serde_json::Map::new();
 
     if current.title != updated.title {
@@ -595,6 +689,16 @@ fn metadata_event_payload(current: &Task, updated: &Task) -> Option<Value> {
             json!({
                 "from": current.due_date.map(|date| date.to_string()),
                 "to": updated.due_date.map(|date| date.to_string()),
+            }),
+        );
+    }
+
+    if current.client_id != updated.client_id {
+        changes.insert(
+            "client".to_string(),
+            json!({
+                "from": previous_client_name,
+                "to": updated_client_name,
             }),
         );
     }
@@ -896,17 +1000,21 @@ mod tests {
 
     use crate::domain::types::{TaskDescription, TaskTitle, UserName};
     use crate::domain::{
+        client::Client,
         task::{
             NewTask as DomainNewTask, TaskAssignment, TaskPriority, TaskStatus,
             UpdateTask as DomainUpdateTask,
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
-        types::{HubId, TaskEventId, TaskId, TaskTrack, UserEmail, UserId},
+        types::{
+            ClientId, ClientName, HubId, PublicId, TaskEventId, TaskId, TaskTrack, UserEmail,
+            UserId,
+        },
         user::User,
     };
     use crate::forms::task::TaskCommentForm;
     use crate::repository::mock::{
-        MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
+        MockClientReader, MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
     };
     use crate::repository::{TaskListQuery, UserListQuery};
     use crate::services::mock::MockZmqSender;
@@ -950,6 +1058,7 @@ mod tests {
         pub task_reader: MockTaskReader,
         pub event_reader: MockTaskEventReader,
         pub user_reader: MockUserReader,
+        pub client_reader: MockClientReader,
     }
 
     impl TaskDetailsRepo {
@@ -958,6 +1067,7 @@ mod tests {
                 task_reader: MockTaskReader::new(),
                 event_reader: MockTaskEventReader::new(),
                 user_reader: MockUserReader::new(),
+                client_reader: MockClientReader::new(),
             }
         }
     }
@@ -1009,6 +1119,20 @@ mod tests {
 
         fn list_users(&self, query: UserListQuery) -> RepositoryResult<(usize, Vec<User>)> {
             self.user_reader.list_users(query)
+        }
+    }
+
+    impl ClientReader for TaskDetailsRepo {
+        fn get_client_by_id(
+            &self,
+            id: ClientId,
+            hub_id: HubId,
+        ) -> RepositoryResult<Option<Client>> {
+            self.client_reader.get_client_by_id(id, hub_id)
+        }
+
+        fn list_clients(&self, hub_id: HubId) -> RepositoryResult<Vec<Client>> {
+            self.client_reader.list_clients(hub_id)
         }
     }
 
@@ -1106,6 +1230,18 @@ mod tests {
             created_at: fixed_datetime(),
             updated_at: fixed_datetime(),
             completed_at: None,
+            client_id: None,
+        }
+    }
+
+    fn sample_client(id: i32, hub_id: i32, name: &str, public_id: &str) -> Client {
+        Client {
+            id: ClientId::new(id).unwrap(),
+            public_id: PublicId::new(public_id).unwrap(),
+            hub_id: HubId::new(hub_id).unwrap(),
+            name: ClientName::new(name).unwrap(),
+            created_at: fixed_datetime(),
+            updated_at: fixed_datetime(),
         }
     }
 
@@ -1214,8 +1350,8 @@ mod tests {
         updated.track = Some(TaskTrack::new("Updated Track").unwrap());
         updated.priority = TaskPriority::High;
 
-        let payload =
-            metadata_event_payload(&current, &updated).expect("expected metadata payload");
+        let payload = metadata_event_payload(&current, &updated, None, None)
+            .expect("expected metadata payload");
 
         let from_priority: &'static str = current.priority.into();
         let to_priority: &'static str = updated.priority.into();
@@ -1233,7 +1369,7 @@ mod tests {
 
         assert_eq!(payload, expected);
 
-        let none_payload = metadata_event_payload(&current, &current);
+        let none_payload = metadata_event_payload(&current, &current, None, None);
         assert!(none_payload.is_none());
     }
 
@@ -1446,9 +1582,11 @@ mod tests {
     struct UpdateRepo {
         task: RefCell<Task>,
         users: RefCell<HashMap<String, User>>,
+        clients: RefCell<HashMap<String, Client>>,
         events: RefCell<Vec<TaskEvent>>,
         next_user_id: RefCell<i32>,
         next_event_id: RefCell<i32>,
+        next_client_id: RefCell<i32>,
     }
 
     impl UpdateRepo {
@@ -1461,9 +1599,11 @@ mod tests {
             Self {
                 task: RefCell::new(task),
                 users: RefCell::new(map),
+                clients: RefCell::new(HashMap::new()),
                 events: RefCell::new(Vec::new()),
                 next_user_id: RefCell::new(10_000),
                 next_event_id: RefCell::new(50_000),
+                next_client_id: RefCell::new(20_000),
             }
         }
 
@@ -1527,6 +1667,7 @@ mod tests {
             task.assigned_to = updates.assigned_to;
             task.completed_at = updates.completed_at;
             task.updated_at = updates.updated_at;
+            task.client_id = updates.client_id;
 
             Ok(task.clone())
         }
@@ -1659,6 +1800,64 @@ mod tests {
 
         fn delete_event(&self, _: TaskEventId, _: HubId) -> RepositoryResult<()> {
             Ok(())
+        }
+    }
+
+    impl ClientWriter for UpdateRepo {
+        fn create_or_update_client(
+            &self,
+            new_client: &crate::domain::client::NewClient,
+        ) -> RepositoryResult<Client> {
+            let mut clients = self.clients.borrow_mut();
+            if let Some(existing) = clients.get_mut(new_client.public_id.as_str()) {
+                existing.name = new_client.name.clone();
+                existing.updated_at = fixed_datetime();
+                return Ok(existing.clone());
+            }
+
+            let id = {
+                let mut counter = self.next_client_id.borrow_mut();
+                let id = *counter;
+                *counter += 1;
+                id
+            };
+
+            let client = Client {
+                id: ClientId::new(id).expect("valid client id"),
+                public_id: new_client.public_id.clone(),
+                hub_id: new_client.hub_id,
+                name: new_client.name.clone(),
+                created_at: fixed_datetime(),
+                updated_at: fixed_datetime(),
+            };
+
+            clients.insert(new_client.public_id.as_str().to_string(), client.clone());
+            Ok(client)
+        }
+    }
+
+    impl ClientReader for UpdateRepo {
+        fn get_client_by_id(
+            &self,
+            id: ClientId,
+            hub_id: HubId,
+        ) -> RepositoryResult<Option<Client>> {
+            Ok(self
+                .clients
+                .borrow()
+                .values()
+                .find(|client| client.id == id && client.hub_id == hub_id)
+                .cloned())
+        }
+
+        fn list_clients(&self, hub_id: HubId) -> RepositoryResult<Vec<Client>> {
+            Ok(self
+                .clients
+                .borrow()
+                .values()
+                .filter(|client| client.hub_id == hub_id)
+                .cloned()
+                .collect())
         }
     }
 
@@ -1803,6 +2002,57 @@ mod tests {
                     "to": "High",
                 }
             })
+        );
+    }
+
+    #[test]
+    fn update_task_updates_client_assignment() {
+        let mut task = sample_task(60, 1, None, 3);
+        let previous_client_id = ClientId::new(501).expect("valid client id");
+        task.client_id = Some(previous_client_id);
+        let repo = UpdateRepo::new(task, Vec::new());
+        repo.clients.borrow_mut().insert(
+            "previous@example.com".to_string(),
+            sample_client(501, 1, "Legacy Co", "previous@example.com"),
+        );
+        let zmq = MockZmqSender {};
+        let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
+
+        let form: UpdateTaskForm = serde_json::from_value(json!({
+            "title": "Updated title",
+            "status": "Pending",
+            "priority": "Middle",
+            "client_name": "Acme Corp",
+            "client_public_id": "client@example.com",
+        }))
+        .expect("valid form payload");
+
+        update_task(60, form, &user, &repo, &zmq).expect("should update task");
+
+        let stored = repo.task.borrow().clone();
+        let clients = repo.clients.borrow();
+        let client = clients
+            .get("client@example.com")
+            .expect("client should be created");
+
+        assert_eq!(stored.client_id, Some(client.id));
+
+        let events = repo.events.borrow();
+        let metadata_event = events
+            .iter()
+            .find(|event| event.event_type == TaskEventType::MetadataUpdated)
+            .expect("metadata event should be recorded");
+
+        let expected_change = json!({
+            "from": "Legacy Co",
+            "to": "Acme Corp",
+        });
+        assert_eq!(
+            metadata_event
+                .event_data
+                .get("client")
+                .expect("client change should be recorded"),
+            &expected_change
         );
     }
 

@@ -10,6 +10,7 @@
                 {% set track_value = filters.track | default(value="") %}
                 {% set priority_value = filters.priority | default(value="") %}
                 {% set assignee_value = filters.assignee | default(value="") %}
+                {% set client_value = filters.client | default(value="") %}
                 {% set updated_after_value = filters.updated_after | default(value="") %}
                 {% set updated_before_value = filters.updated_before | default(value="") %}
                 {% if filters.search %}
@@ -44,9 +45,19 @@
                     <select id="filterAssignee" name="assignee" class="form-select">
                         <option value=""{% if assignee_value == "" %} selected{% endif %}>Любой</option>
                         {% for option_user in users %}
-                            {% set option_user_id = option_user.id ~ "" %}
-                            <option value="{{ option_user.id }}"{% if assignee_value == option_user_id %} selected{% endif %}>
+                            <option value="{{ option_user.id }}"{% if assignee_value == option_user.id %} selected{% endif %}>
                                 {{ option_user.name }} ({{ option_user.email }})
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6">
+                    <label for="filterClient" class="form-label small text-uppercase text-muted mb-1">Клиент</label>
+                    <select id="filterClient" name="client" class="form-select">
+                        <option value=""{% if client_value == "" %} selected{% endif %}>Любой</option>
+                        {% for option_client in clients %}
+                            <option value="{{ option_client.id }}"{% if client_value == option_client.id %} selected{% endif %}>
+                                {{ option_client.name }}
                             </option>
                         {% endfor %}
                     </select>
