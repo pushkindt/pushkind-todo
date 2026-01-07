@@ -7,3 +7,4 @@ templates_dir: templates/**/*
 secret: env::APP_SECRET
 auth_service_url: ""
 crm_service_url: ""
+zmq_task_events_pub: tcp://127.0.0.1:5563

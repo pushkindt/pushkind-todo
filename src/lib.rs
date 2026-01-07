@@ -1,6 +1,4 @@
 //! Core Actix-Web application wiring the repository, routes, and notification services into a runnable server.
-use std::sync::Arc;
-
 use actix_files::Files;
 use actix_identity::IdentityMiddleware;
 use actix_session::{SessionMiddleware, storage::CookieSessionStore};
@@ -14,7 +12,7 @@ use pushkind_common::routes::{logout, not_assigned};
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
 use tera::Tera;
 
-use crate::models::config::ServerConfig;
+use crate::models::config::{ServerConfig, ZmqSenders};
 use crate::repository::DieselRepository;
 use crate::routes::main::{add_task, show_index, tasks_upload};
 use crate::routes::task::{
@@ -39,13 +37,21 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
         secret: server_config.secret.clone(),
     };
 
-    // Start a background ZeroMQ publisher used for outbound email notifications.
-    let zmq_sender = ZmqSender::start(ZmqSenderOptions::pub_default(
+    // Start background ZeroMQ senders used for outbound notifications and integration events.
+    let emailer = ZmqSender::start(ZmqSenderOptions::pub_default(
         &server_config.zmq_emailer_pub,
     ))
-    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ sender: {e}")))?;
+    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
 
-    let zmq_sender = Arc::new(zmq_sender);
+    let task_events = ZmqSender::start(ZmqSenderOptions::pub_default(
+        &server_config.zmq_task_events_pub,
+    ))
+    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ task-events sender: {e}")))?;
+
+    let zmq_senders = web::Data::new(ZmqSenders {
+        emailer,
+        task_events,
+    });
 
     // Establish Diesel connection pool for the SQLite database.
     let pool = establish_connection_pool(&server_config.database_url).map_err(|e| {
@@ -97,7 +103,7 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
             .app_data(web::Data::new(repo.clone()))
             .app_data(web::Data::new(server_config.clone()))
             .app_data(web::Data::new(common_config.clone()))
-            .app_data(web::Data::new(zmq_sender.clone()))
+            .app_data(zmq_senders.clone())
     })
     .bind(bind_address)?
     .run()
