@@ -38,19 +38,19 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     };
 
     // Start background ZeroMQ senders used for outbound notifications and integration events.
-    let emailer = ZmqSender::start(ZmqSenderOptions::pub_default(
+    let emailer_sender = ZmqSender::start(ZmqSenderOptions::pub_default(
         &server_config.zmq_emailer_pub,
     ))
     .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
 
-    let task_events = ZmqSender::start(ZmqSenderOptions::pub_default(
-        &server_config.zmq_task_events_pub,
-    ))
-    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ task-events sender: {e}")))?;
+    let task_sender = ZmqSender::start(ZmqSenderOptions::pub_default(&server_config.zmq_tasks_pub))
+        .map_err(|e| {
+            std::io::Error::other(format!("Failed to start ZMQ task-events sender: {e}"))
+        })?;
 
     let zmq_senders = web::Data::new(ZmqSenders {
-        emailer,
-        task_events,
+        emailer: emailer_sender,
+        tasks: task_sender,
     });
 
     // Establish Diesel connection pool for the SQLite database.
