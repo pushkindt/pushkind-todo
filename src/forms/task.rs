@@ -8,7 +8,7 @@ use crate::domain::{
     client::NewClient,
     task::{TaskPriority, TaskStatus},
     types::{
-        ClientName, HubId, PublicId, TaskComment, TaskDescription, TaskTitle, TaskTrack,
+        ClientName, ClientPublicId, HubId, TaskComment, TaskDescription, TaskTitle, TaskTrack,
         TypeConstraintError, UserEmail, UserName,
     },
     user::NewUser,
@@ -98,7 +98,7 @@ pub struct ClientSelectionPayload {
     /// Display name for the selected user.
     pub name: ClientName,
     /// Email address for the selected user.
-    pub public_id: PublicId,
+    pub public_id: ClientPublicId,
 }
 
 /// Form payload submitted when leaving a new comment on a task.
@@ -235,7 +235,7 @@ impl ClientSelectionPayload {
     /// Convert the selection into a new user payload.
     pub fn into_domain(self, hub_id: HubId) -> Result<NewClient, TypeConstraintError> {
         let name = ClientName::new(self.name)?;
-        let public_id = PublicId::new(self.public_id)?;
+        let public_id = ClientPublicId::new(self.public_id)?;
 
         Ok(NewClient::new(hub_id, name, public_id))
     }
@@ -248,7 +248,7 @@ impl TryFrom<ClientSelectionForm> for Option<ClientSelectionPayload> {
         match (form.client_name, form.client_public_id) {
             (Some(name), Some(public_id)) => Ok(Some(ClientSelectionPayload {
                 name: ClientName::new(name).map_err(|_| FormError::InvalidClientName)?,
-                public_id: PublicId::new(public_id)
+                public_id: ClientPublicId::new(public_id)
                     .map_err(|_| FormError::InvalidClientPublicId)?,
             })),
             _ => Ok(None),

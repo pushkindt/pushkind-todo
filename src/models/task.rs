@@ -8,7 +8,8 @@ use crate::domain::{
         TaskPriority, TaskStatus, UpdateTask as DomainUpdateTask,
     },
     types::{
-        ClientId, HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, TypeConstraintError, UserId,
+        ClientId, HubId, TaskDescription, TaskId, TaskPublicId, TaskTitle, TaskTrack,
+        TypeConstraintError, UserId,
     },
 };
 
@@ -32,6 +33,7 @@ pub struct Task {
     pub updated_at: NaiveDateTime,
     pub completed_at: Option<NaiveDateTime>,
     pub client_id: Option<i32>,
+    pub public_id: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Insertable)]
@@ -50,6 +52,7 @@ pub struct NewTask<'a> {
     pub updated_at: NaiveDateTime,
     pub completed_at: Option<NaiveDateTime>,
     pub client_id: Option<i32>,
+    pub public_id: &'a [u8],
 }
 
 #[derive(Debug, AsChangeset)]
@@ -108,6 +111,7 @@ impl TryFrom<Task> for DomainTask {
             updated_at,
             completed_at,
             client_id,
+            public_id,
         } = value;
 
         let status = TaskStatus::try_from(status_text.as_str())?;
@@ -138,6 +142,9 @@ impl TryFrom<Task> for DomainTask {
             updated_at,
             completed_at,
             client_id: client_id.map(ClientId::new).transpose()?,
+            public_id: public_id
+                .map(|val| TaskPublicId::from_bytes(&val))
+                .transpose()?,
         })
     }
 }
@@ -158,6 +165,7 @@ impl<'a> From<&'a DomainNewTask> for NewTask<'a> {
             updated_at: value.updated_at,
             completed_at: None,
             client_id: value.client_id.map(|id| id.get()),
+            public_id: value.public_id.as_bytes(),
         }
     }
 }

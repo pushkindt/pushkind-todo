@@ -95,7 +95,14 @@ pub async fn update_task(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_senders = zmq_senders.get_ref();
-    match task_service::update_task(task_id, form, &user, repo.get_ref(), &zmq_senders.emailer) {
+    match task_service::update_task(
+        task_id,
+        form,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+        &zmq_senders.tasks,
+    ) {
         Ok(updated_task) => {
             FlashMessage::success("Задача обновлена.").send();
             redirect(&format!("/task/{}", updated_task.id))
@@ -139,6 +146,7 @@ pub async fn quick_update_task_status(
         &user,
         repo.get_ref(),
         &zmq_senders.emailer,
+        &zmq_senders.tasks,
     ) {
         Ok(_) => {
             FlashMessage::success("Статус задачи обновлён.").send();

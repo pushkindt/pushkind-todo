@@ -11,6 +11,7 @@ use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
 use crate::domain::types::{ClientId, HubId, TaskTrack, UserId};
 use crate::domain::user::{NewUser, User};
+use crate::dto::zmq::ZmqTask;
 use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
 use crate::repository::{
     ClientReader, TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
@@ -202,15 +203,17 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 }
 
 /// Validates the add-task form and persists a new task record.
-pub fn add_task<R, Z>(
+pub fn add_task<R, ZE, ZT>(
     form: AddTaskForm,
     user: &AuthenticatedUser,
     repo: &R,
-    zmq_sender: &Z,
+    zmq_email_sender: &ZE,
+    zmq_task_sender: &ZT,
 ) -> ServiceResult<Task>
 where
     R: TaskWriter + UserReader + UserWriter + ?Sized,
-    Z: ZmqSenderExt,
+    ZE: ZmqSenderExt,
+    ZT: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -240,7 +243,7 @@ where
     if let Some(assignee) = assignee_user.as_ref() {
         match build_task_created_email(&created, &author, assignee, user) {
             Ok(Some(email)) => {
-                if let Err(err) = notifications::queue_email(zmq_sender, user, email) {
+                if let Err(err) = notifications::queue_email(zmq_email_sender, user, email) {
                     log::error!("Failed to queue task-created email: {err}");
                 }
             }
@@ -248,6 +251,17 @@ where
             Err(err) => {
                 log::error!("Failed to build task-created email: {err}");
             }
+        }
+    }
+
+    match ZmqTask::try_from((&created, &author, assignee_user.as_ref(), None)) {
+        Ok(snapshot) => {
+            if let Err(err) = notifications::queue_task_snapshot(zmq_task_sender, snapshot) {
+                log::error!("Failed to queue task snapshot: {err}");
+            }
+        }
+        Err(err) => {
+            log::warn!("Skipping task snapshot: {err}");
         }
     }
 
@@ -394,6 +408,7 @@ mod tests {
             updated_at: fixed_datetime(),
             completed_at: None,
             client_id: None,
+            public_id: None,
         }
     }
 
@@ -1146,7 +1161,7 @@ mod tests {
             assignee: assignee_selection_form_none(),
         };
 
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -1176,7 +1191,7 @@ mod tests {
         repo.user_writer.expect_touch_visited_at().never();
         repo.task_writer.expect_create_task().never();
 
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         match result {
             Err(ServiceError::Form(message)) => {
@@ -1247,7 +1262,7 @@ mod tests {
             })
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         let created = match result {
             Ok(value) => value,
@@ -1351,7 +1366,7 @@ mod tests {
             });
 
         let zmq = MockZmqSender {};
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         let created = match result {
             Ok(value) => value,
@@ -1365,7 +1380,8 @@ mod tests {
     #[test]
     fn add_task_notifies_assignee_via_email() {
         let mut repo = TaskWriterUserRepo::new();
-        let zmq = RecordingZmqSender::default();
+        let zmq_email = RecordingZmqSender::default();
+        let zmq_tasks = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
         let assignee_email = "assignee@example.com".to_string();
         let assignee_name = "Assigned User".to_string();
@@ -1438,6 +1454,7 @@ mod tests {
             updated_at: fixed_datetime(),
             completed_at: None,
             client_id: None,
+            public_id: None,
         };
 
         repo.task_writer.expect_create_task().times(1).returning({
@@ -1452,11 +1469,12 @@ mod tests {
             }
         });
 
-        let outcome = add_task(form, &user, &repo, &zmq).expect("should create task");
+        let outcome =
+            add_task(form, &user, &repo, &zmq_email, &zmq_tasks).expect("should create task");
 
         assert_eq!(outcome.id, created_task.id);
 
-        let payloads = zmq.messages();
+        let payloads = zmq_email.messages();
         assert_eq!(payloads.len(), 1);
 
         let envelope: ZMQSendEmailMessage =
@@ -1553,7 +1571,7 @@ mod tests {
             .returning(move |_| Ok(sample_task(1, hub_for_return, "alpha")));
 
         let zmq = MockZmqSender {};
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         assert!(result.is_ok(), "expected task creation to succeed");
     }
@@ -1606,7 +1624,7 @@ mod tests {
             })
             .returning(|_| Err(RepositoryError::Unexpected("db write failed".to_string())));
 
-        let result = add_task(form, &user, &repo, &zmq);
+        let result = add_task(form, &user, &repo, &zmq, &zmq);
 
         match result {
             Err(ServiceError::Repository(RepositoryError::Unexpected(message))) => {

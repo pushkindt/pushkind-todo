@@ -1,36 +1,64 @@
 //! Core Actix-Web application wiring the repository, routes, and notification services into a runnable server.
+
+#[cfg(feature = "server")]
 use actix_files::Files;
+#[cfg(feature = "server")]
 use actix_identity::IdentityMiddleware;
+#[cfg(feature = "server")]
 use actix_session::{SessionMiddleware, storage::CookieSessionStore};
+#[cfg(feature = "server")]
 use actix_web::cookie::Key;
+#[cfg(feature = "server")]
 use actix_web::{App, HttpServer, middleware, web};
+#[cfg(feature = "server")]
 use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
+#[cfg(feature = "server")]
 use pushkind_common::db::establish_connection_pool;
+#[cfg(feature = "server")]
 use pushkind_common::middleware::RedirectUnauthorized;
+#[cfg(feature = "server")]
 use pushkind_common::models::config::CommonServerConfig;
+#[cfg(feature = "server")]
 use pushkind_common::routes::{logout, not_assigned};
+#[cfg(feature = "server")]
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
+#[cfg(feature = "server")]
 use tera::Tera;
 
+#[cfg(feature = "server")]
 use crate::models::config::{ServerConfig, ZmqSenders};
+#[cfg(feature = "server")]
 use crate::repository::DieselRepository;
+#[cfg(feature = "server")]
 use crate::routes::main::{add_task, show_index, tasks_upload};
+#[cfg(feature = "server")]
 use crate::routes::task::{
     add_task_comment, delete_task, quick_update_task_status, show_task, task_modal, update_task,
 };
 
+#[cfg(feature = "data")]
 pub mod domain;
+#[cfg(feature = "data")]
 pub mod dto;
+#[cfg(feature = "server")]
 pub mod error_conversions;
+#[cfg(feature = "server")]
 pub mod forms;
+#[cfg(feature = "data")]
 pub mod models;
+#[cfg(feature = "server")]
 pub mod repository;
+#[cfg(feature = "server")]
 pub mod routes;
+#[cfg(feature = "data")]
 pub mod schema;
+#[cfg(feature = "server")]
 pub mod services;
 
+#[cfg(feature = "server")]
 pub const SERVICE_ACCESS_ROLE: &str = "todo";
 
+#[cfg(feature = "server")]
 pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     let common_config = CommonServerConfig {
         auth_service_url: server_config.auth_service_url.clone(),

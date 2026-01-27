@@ -4,7 +4,7 @@ use diesel::prelude::*;
 
 use crate::domain::{
     client::{Client as DomainClient, NewClient as DomainNewClient},
-    types::{ClientId, ClientName, HubId, PublicId, TypeConstraintError},
+    types::{ClientId, ClientName, ClientPublicId, HubId, TypeConstraintError},
 };
 
 #[derive(Debug, Clone, Identifiable, Queryable, Selectable)]
@@ -32,7 +32,7 @@ impl TryFrom<Client> for DomainClient {
     fn try_from(value: Client) -> Result<Self, Self::Error> {
         Ok(Self {
             id: ClientId::new(value.id)?,
-            public_id: PublicId::new(value.public_id)?,
+            public_id: ClientPublicId::new(value.public_id)?,
             hub_id: HubId::new(value.hub_id)?,
             name: ClientName::new(value.name)?,
             created_at: value.created_at,

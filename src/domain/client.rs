@@ -3,13 +3,13 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::types::{ClientId, ClientName, HubId, PublicId, TypeConstraintError};
+use crate::domain::types::{ClientId, ClientName, ClientPublicId, HubId, TypeConstraintError};
 
 /// Represent a trusted CRM client stored in the system.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Client {
     pub id: ClientId,
-    pub public_id: PublicId,
+    pub public_id: ClientPublicId,
     pub hub_id: HubId,
     pub name: ClientName,
     pub created_at: NaiveDateTime,
@@ -21,7 +21,7 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ClientId,
-        public_id: PublicId,
+        public_id: ClientPublicId,
         hub_id: HubId,
         name: ClientName,
         created_at: NaiveDateTime,
@@ -49,7 +49,7 @@ impl Client {
     ) -> Result<Self, TypeConstraintError> {
         Ok(Self::new(
             ClientId::try_from(id)?,
-            PublicId::new(public_id)?,
+            ClientPublicId::new(public_id)?,
             HubId::try_from(hub_id)?,
             ClientName::new(name)?,
             created_at,
@@ -61,7 +61,7 @@ impl Client {
 /// Data required to persist a new client record.
 #[derive(Clone, Debug, Deserialize)]
 pub struct NewClient {
-    pub public_id: PublicId,
+    pub public_id: ClientPublicId,
     pub hub_id: HubId,
     pub name: ClientName,
 }
@@ -69,7 +69,7 @@ pub struct NewClient {
 impl NewClient {
     /// Create a new client from already validated domain values.
     #[must_use]
-    pub fn new(hub_id: HubId, name: ClientName, public_id: PublicId) -> Self {
+    pub fn new(hub_id: HubId, name: ClientName, public_id: ClientPublicId) -> Self {
         Self {
             public_id,
             hub_id,
@@ -86,7 +86,7 @@ impl NewClient {
         Ok(Self::new(
             HubId::try_from(hub_id)?,
             ClientName::new(name)?,
-            PublicId::new(public_id)?,
+            ClientPublicId::new(public_id)?,
         ))
     }
 }

@@ -7,6 +7,7 @@
 - Record an auditable task event stream (comments, status/assignment/metadata changes).
 - Support bulk task creation via CSV upload.
 - Publish outbound email notifications (via ZeroMQ) for task creation, updates, and comments.
+- Publish task snapshot payloads over ZeroMQ to `zmq_tasks_pub` on task create/update/status changes, skipping sends when the task lacks a `public_id`.
 - Enforce authentication + authorization via `pushkind_common` with role gating (`SERVICE_ACCESS_ROLE = "todo"`).
 
 ## Non-goals
@@ -96,6 +97,8 @@ All mounted under `web::scope("").wrap(RedirectUnauthorized)` (`src/lib.rs`).
 - `POST /task/add` (`src/routes/main.rs:add_task`)
   - Form body: `AddTaskForm` (`src/forms/main.rs`) — `title`, `message`, `track`, `priority`, optional assignee fields (`name`, `email`).
   - Response: redirect to `/` with flash message.
+  - Side effects:
+    - Publishes the task snapshot over ZeroMQ to `zmq_tasks_pub` when the task has a `public_id`.
 - `POST /tasks/upload` (`src/routes/main.rs:tasks_upload`)
   - Multipart body: `UploadTasksForm` with `csv` file up to 10MB.
   - CSV schema: headers `title,description` (both optional; empty/missing title rows are skipped).
@@ -111,6 +114,7 @@ All mounted under `web::scope("").wrap(RedirectUnauthorized)` (`src/lib.rs`).
   - Side effects:
     - Updates task fields.
     - Records `TaskEvent` entries for `StatusChanged`, `AssignmentChanged`, and/or `MetadataUpdated` when applicable (`src/services/task.rs`).
+    - Publishes the task snapshot over ZeroMQ to `zmq_tasks_pub` when the task has a `public_id`.
 - `POST /task/{task_id}/status` (`src/routes/task.rs:quick_update_task_status`)
   - Form body: `QuickTaskStatusForm` (`src/forms/task.rs`) — `status`, `comment?`, `assign_self` (bool).
   - Response: redirect to `/task/{id}` with flash message.
@@ -118,6 +122,7 @@ All mounted under `web::scope("").wrap(RedirectUnauthorized)` (`src/lib.rs`).
     - Changes status and, when `status == Completed`, sets `completed_at`; otherwise clears it.
     - When `assign_self == true` and `status == InProgress`, assigns the current user.
     - Records `StatusChanged` / `AssignmentChanged` events; optionally records a `Comment` event if `comment` is non-empty after sanitization.
+    - Publishes the task snapshot over ZeroMQ to `zmq_tasks_pub` when the task has a `public_id`.
 - `POST /task/{task_id}/comments` (`src/routes/task.rs:add_task_comment`)
   - Form body: `NewTaskCommentForm` (`src/forms/task.rs`) — `message`.
   - Response: redirect to `/task/{id}` with flash message.

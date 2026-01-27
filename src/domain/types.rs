@@ -3,11 +3,12 @@
 //! These wrappers enforce basic invariants (e.g., positive identifiers,
 //! normalized/validated email) so that once a value reaches the domain layer it
 //! can be treated as trusted.
-use std::ops::Deref;
+use std::{ops::Deref, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
+use uuid::Uuid;
 use validator::ValidateEmail;
 
 /// Errors produced when attempting to construct a constrained value object.
@@ -31,6 +32,10 @@ pub enum TypeConstraintError {
 
     #[error("invalid value HTML text")]
     InvalidHtml,
+
+    /// Provided uuid failed format validation.
+    #[error("invalid uuid value")]
+    InvalidUuid,
 }
 
 /// Macro to generate lightweight newtypes for positive identifiers.
@@ -91,8 +96,21 @@ pub struct UserEmail(String);
 impl UserEmail {
     /// Validates and normalizes an email string.
     pub fn new<S: Into<String>>(email: S) -> Result<Self, TypeConstraintError> {
-        let normalized = normalize_email(email)?;
-        Ok(Self(normalized))
+        let mut normalized = email.into();
+        let trimmed = normalized.trim();
+        if trimmed.len() != normalized.len() {
+            normalized = trimmed.to_string();
+        }
+        if normalized.is_ascii() {
+            normalized.make_ascii_lowercase();
+        } else {
+            normalized = normalized.to_lowercase();
+        }
+        if normalized.validate_email() {
+            Ok(Self(normalized))
+        } else {
+            Err(TypeConstraintError::InvalidEmail)
+        }
     }
 
     /// Borrow the email as a `&str`.
@@ -261,8 +279,8 @@ non_empty_string_newtype!(
 );
 
 non_empty_string_newtype!(
-    PublicId,
-    "Customer name wrapper enforcing non-empty values."
+    ClientPublicId,
+    "Customer public identifier wrapper enforcing non-empty values."
 );
 
 macro_rules! html_string_newtype {
@@ -311,12 +329,46 @@ html_string_newtype!(
     "Task comment wrapper for optional HTML content."
 );
 
-/// Normalizes and validates an email string.
-fn normalize_email<S: Into<String>>(email: S) -> Result<String, TypeConstraintError> {
-    let normalized = email.into().trim().to_lowercase();
-    if normalized.validate_email() {
-        Ok(normalized)
-    } else {
-        Err(TypeConstraintError::InvalidEmail)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TaskPublicId(Uuid);
+
+impl TaskPublicId {
+    /// Generate a new random public ID
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// Parse from raw bytes (DB boundary)
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, TypeConstraintError> {
+        Ok(Self(
+            Uuid::from_slice(bytes).map_err(|_| TypeConstraintError::InvalidUuid)?,
+        ))
+    }
+
+    /// Convert to raw bytes (DB boundary)
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        self.0.as_bytes()
+    }
+}
+
+impl Display for TaskPublicId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for TaskPublicId {
+    type Err = TypeConstraintError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(
+            Uuid::parse_str(s).map_err(|_| TypeConstraintError::InvalidUuid)?,
+        ))
+    }
+}
+
+impl Default for TaskPublicId {
+    fn default() -> Self {
+        Self::new()
     }
 }
