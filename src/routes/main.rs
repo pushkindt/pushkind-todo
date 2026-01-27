@@ -60,7 +60,13 @@ pub async fn add_task(
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
     let zmq_senders = zmq_senders.get_ref();
-    match main_service::add_task(form, &user, repo.get_ref(), &zmq_senders.emailer) {
+    match main_service::add_task(
+        form,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+        &zmq_senders.tasks,
+    ) {
         Ok(_) => {
             FlashMessage::success("Задача добавлена.").send();
             redirect("/")

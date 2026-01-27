@@ -48,6 +48,7 @@ diesel::table! {
         track -> Nullable<Text>,
         priority -> Text,
         client_id -> Nullable<Integer>,
+        public_id -> Nullable<Binary>,
     }
 }
 

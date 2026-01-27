@@ -2,3 +2,4 @@
 .env
 app.*
 .agent/
+tarpaulin-report*

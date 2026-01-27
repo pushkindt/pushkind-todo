@@ -2,7 +2,7 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::types::ClientId;
+use crate::domain::types::{ClientId, TaskPublicId};
 
 use super::types::{
     HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, TypeConstraintError, UserId,
@@ -56,11 +56,15 @@ impl From<TaskPriority> for &'static str {
 impl TryFrom<&str> for TaskPriority {
     type Error = TypeConstraintError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.trim().to_lowercase().as_str() {
-            "low" => Ok(TaskPriority::Low),
-            "high" => Ok(TaskPriority::High),
-            "middle" => Ok(TaskPriority::Middle),
-            _ => Err(TypeConstraintError::InvalidTaskPriority),
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("low") {
+            Ok(TaskPriority::Low)
+        } else if trimmed.eq_ignore_ascii_case("high") {
+            Ok(TaskPriority::High)
+        } else if trimmed.eq_ignore_ascii_case("middle") {
+            Ok(TaskPriority::Middle)
+        } else {
+            Err(TypeConstraintError::InvalidTaskPriority)
         }
     }
 }
@@ -96,6 +100,8 @@ pub struct Task {
     pub completed_at: Option<NaiveDateTime>,
     /// Optional client the task is associated with.
     pub client_id: Option<ClientId>,
+    /// Optional public id of the task
+    pub public_id: Option<TaskPublicId>,
 }
 
 impl Task {
@@ -108,6 +114,7 @@ impl Task {
 /// Parameters required to create a new task.
 #[derive(Debug, Clone)]
 pub struct NewTask {
+    pub public_id: TaskPublicId,
     /// Hub that should own the new task.
     pub hub_id: HubId,
     /// Title for the task.
@@ -151,6 +158,7 @@ impl NewTask {
             created_at: now,
             updated_at: now,
             client_id: None,
+            public_id: TaskPublicId::new(),
         }
     }
 
@@ -255,13 +263,19 @@ impl From<TaskStatus> for &'static str {
 impl TryFrom<&str> for TaskStatus {
     type Error = TypeConstraintError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.trim().to_lowercase().as_str() {
-            "pending" => Ok(TaskStatus::Pending),
-            "inprogress" => Ok(TaskStatus::InProgress),
-            "blocked" => Ok(TaskStatus::Blocked),
-            "completed" => Ok(TaskStatus::Completed),
-            "archived" => Ok(TaskStatus::Archived),
-            _ => Err(TypeConstraintError::InvalidTaskStatus),
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("pending") {
+            Ok(TaskStatus::Pending)
+        } else if trimmed.eq_ignore_ascii_case("inprogress") {
+            Ok(TaskStatus::InProgress)
+        } else if trimmed.eq_ignore_ascii_case("blocked") {
+            Ok(TaskStatus::Blocked)
+        } else if trimmed.eq_ignore_ascii_case("completed") {
+            Ok(TaskStatus::Completed)
+        } else if trimmed.eq_ignore_ascii_case("archived") {
+            Ok(TaskStatus::Archived)
+        } else {
+            Err(TypeConstraintError::InvalidTaskStatus)
         }
     }
 }

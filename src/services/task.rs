@@ -18,6 +18,7 @@ use crate::domain::{
     types::UserId,
     user::User,
 };
+use crate::dto::zmq::ZmqTask;
 use crate::forms::task::{
     QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
     UpdateTaskForm, UpdateTaskPayload,
@@ -157,12 +158,13 @@ where
 }
 
 /// Update a task with the values submitted from the edit form.
-pub fn update_task<R, Z>(
+pub fn update_task<R, ZE, ZT>(
     task_id: i32,
     form: UpdateTaskForm,
     user: &AuthenticatedUser,
     repo: &R,
-    zmq_sender: &Z,
+    zmq_email_sender: &ZE,
+    zmq_task_sender: &ZT,
 ) -> ServiceResult<Task>
 where
     R: TaskReader
@@ -174,7 +176,8 @@ where
         + ClientReader
         + ClientWriter
         + ?Sized,
-    Z: ZmqSenderExt,
+    ZE: ZmqSenderExt,
+    ZT: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -360,7 +363,17 @@ where
         repo.touch_visited_at(actor.id, actor.hub_id)?;
     }
 
-    let author_user = repo.get_user_by_id(updated.author_id, hub_id)?;
+    let author_user = match repo.get_user_by_id(updated.author_id, hub_id) {
+        Ok(user) => user,
+        Err(err) => {
+            log::error!(
+                "Failed to load task author {} for task {}: {err}",
+                updated.author_id,
+                updated.id
+            );
+            None
+        }
+    };
 
     let event_actors = {
         let mut actors = Vec::new();
@@ -398,21 +411,101 @@ where
         assignee_user.as_ref(),
         &event_actors,
         user,
-    ) && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    ) && let Err(err) = notifications::queue_email(zmq_email_sender, user, email)
     {
         log::error!("Failed to queue task-updated email: {err}");
+    }
+
+    if let Some(author) = author_user.as_ref() {
+        let snapshot_assignee = match updated.assigned_to {
+            Some(assignee_id) => {
+                if let Some(assignee) = assignee_user
+                    .as_ref()
+                    .filter(|assignee| assignee.id == assignee_id)
+                {
+                    Some(assignee.clone())
+                } else {
+                    match repo.get_user_by_id(assignee_id, hub_id) {
+                        Ok(Some(user)) => Some(user),
+                        Ok(None) => {
+                            log::warn!(
+                                "Task {} references missing assignee {}",
+                                updated.id,
+                                assignee_id
+                            );
+                            None
+                        }
+                        Err(err) => {
+                            log::error!(
+                                "Failed to load task assignee {} for task {}: {err}",
+                                assignee_id,
+                                updated.id
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let snapshot_client = match updated.client_id {
+            Some(client_id) => {
+                if let Some(client) = client.as_ref().filter(|client| client.id == client_id) {
+                    Some(client.clone())
+                } else {
+                    match repo.get_client_by_id(client_id, hub_id) {
+                        Ok(Some(client)) => Some(client),
+                        Ok(None) => {
+                            log::warn!(
+                                "Task {} references missing client {}",
+                                updated.id,
+                                client_id
+                            );
+                            None
+                        }
+                        Err(err) => {
+                            log::error!(
+                                "Failed to load task client {} for task {}: {err}",
+                                client_id,
+                                updated.id
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+            None => None,
+        };
+
+        match ZmqTask::try_from((
+            &updated,
+            author,
+            snapshot_assignee.as_ref(),
+            snapshot_client.as_ref(),
+        )) {
+            Ok(snapshot) => {
+                if let Err(err) = notifications::queue_task_snapshot(zmq_task_sender, snapshot) {
+                    log::error!("Failed to queue task snapshot: {err}");
+                }
+            }
+            Err(err) => {
+                log::warn!("Skipping task snapshot: {err}");
+            }
+        }
     }
 
     Ok(updated)
 }
 
 /// Transition the task status with a lightweight quick action from the UI.
-pub fn transition_task_status<R, Z>(
+pub fn transition_task_status<R, ZE, ZT>(
     task_id: i32,
     form: QuickTaskStatusForm,
     user: &AuthenticatedUser,
     repo: &R,
-    zmq_sender: &Z,
+    zmq_email_sender: &ZE,
+    zmq_task_sender: &ZT,
 ) -> ServiceResult<Task>
 where
     R: TaskReader
@@ -421,8 +514,10 @@ where
         + TaskEventWriter
         + UserReader
         + UserWriter
+        + ClientReader
         + ?Sized,
-    Z: ZmqSenderExt,
+    ZE: ZmqSenderExt,
+    ZT: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
@@ -510,7 +605,17 @@ where
         }
     }
 
-    let author_user = repo.get_user_by_id(updated.author_id, hub_id)?;
+    let author_user = match repo.get_user_by_id(updated.author_id, hub_id) {
+        Ok(user) => user,
+        Err(err) => {
+            log::error!(
+                "Failed to load task author {} for task {}: {err}",
+                updated.author_id,
+                updated.id
+            );
+            None
+        }
+    };
 
     let assignee_user = match updated.assigned_to {
         Some(assignee_id) => repo.get_user_by_id(assignee_id, hub_id)?,
@@ -553,16 +658,57 @@ where
         assignee_user.as_ref(),
         &event_actors,
         user,
-    ) && let Err(err) = notifications::queue_email(zmq_sender, user, email)
+    ) && let Err(err) = notifications::queue_email(zmq_email_sender, user, email)
     {
         log::error!("Failed to queue task-updated email: {err}");
+    }
+
+    if let Some(author) = author_user.as_ref() {
+        let snapshot_client = match updated.client_id {
+            Some(client_id) => match repo.get_client_by_id(client_id, hub_id) {
+                Ok(Some(client)) => Some(client),
+                Ok(None) => {
+                    log::warn!(
+                        "Task {} references missing client {}",
+                        updated.id,
+                        client_id
+                    );
+                    None
+                }
+                Err(err) => {
+                    log::error!(
+                        "Failed to load task client {} for task {}: {err}",
+                        client_id,
+                        updated.id
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
+        match ZmqTask::try_from((
+            &updated,
+            author,
+            assignee_user.as_ref(),
+            snapshot_client.as_ref(),
+        )) {
+            Ok(snapshot) => {
+                if let Err(err) = notifications::queue_task_snapshot(zmq_task_sender, snapshot) {
+                    log::error!("Failed to queue task snapshot: {err}");
+                }
+            }
+            Err(err) => {
+                log::warn!("Skipping task snapshot: {err}");
+            }
+        }
     }
 
     if let Some(comment_text) = payload.comment {
         let form = TaskCommentForm {
             message: comment_text.to_string(),
         };
-        if let Err(err) = add_task_comment(task_id.get(), form, user, repo, zmq_sender) {
+        if let Err(err) = add_task_comment(task_id.get(), form, user, repo, zmq_email_sender) {
             log::error!("Failed to attach quick status comment for task {task_id}: {err}");
         }
     }
@@ -1007,7 +1153,7 @@ mod tests {
         },
         task_event::{NewTaskEvent as DomainNewTaskEvent, TaskEventType},
         types::{
-            ClientId, ClientName, HubId, PublicId, TaskEventId, TaskId, TaskTrack, UserEmail,
+            ClientId, ClientName, ClientPublicId, HubId, TaskEventId, TaskId, TaskTrack, UserEmail,
             UserId,
         },
         user::User,
@@ -1231,13 +1377,14 @@ mod tests {
             updated_at: fixed_datetime(),
             completed_at: None,
             client_id: None,
+            public_id: None,
         }
     }
 
     fn sample_client(id: i32, hub_id: i32, name: &str, public_id: &str) -> Client {
         Client {
             id: ClientId::new(id).unwrap(),
-            public_id: PublicId::new(public_id).unwrap(),
+            public_id: ClientPublicId::new(public_id).unwrap(),
             hub_id: HubId::new(hub_id).unwrap(),
             name: ClientName::new(name).unwrap(),
             created_at: fixed_datetime(),
@@ -1882,7 +2029,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(42, form, &user, &repo, &zmq).expect("should update task");
+        let outcome = update_task(42, form, &user, &repo, &zmq, &zmq).expect("should update task");
 
         assert_eq!(outcome.id, TaskId::new(42).unwrap());
         assert_eq!(outcome.title.as_str(), "Updated title");
@@ -1964,7 +2111,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome = update_task(50, form, &user, &repo, &zmq).expect("should update task");
+        let outcome = update_task(50, form, &user, &repo, &zmq, &zmq).expect("should update task");
 
         assert_eq!(outcome.title.as_str(), "Updated title");
 
@@ -2027,7 +2174,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        update_task(60, form, &user, &repo, &zmq).expect("should update task");
+        update_task(60, form, &user, &repo, &zmq, &zmq).expect("should update task");
 
         let stored = repo.task.borrow().clone();
         let clients = repo.clients.borrow();
@@ -2069,7 +2216,8 @@ mod tests {
         repo.events
             .borrow_mut()
             .push(sample_event(77, task.id, Some(commenter.id)));
-        let zmq = RecordingZmqSender::default();
+        let zmq_email = RecordingZmqSender::default();
+        let zmq_tasks = MockZmqSender {};
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form: UpdateTaskForm = serde_json::from_value(json!({
@@ -2083,12 +2231,12 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome =
-            update_task(task.id.get(), form, &user, &repo, &zmq).expect("should update task");
+        let outcome = update_task(task.id.get(), form, &user, &repo, &zmq_email, &zmq_tasks)
+            .expect("should update task");
 
         assert_eq!(outcome.title.as_str(), "Updated title");
 
-        let payloads = zmq.messages();
+        let payloads = zmq_email.messages();
         assert_eq!(payloads.len(), 1);
 
         let envelope: ZMQSendEmailMessage =
@@ -2137,7 +2285,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        update_task(7, form, &user, &repo, &zmq).expect("should create assignee");
+        update_task(7, form, &user, &repo, &zmq, &zmq).expect("should create assignee");
 
         let stored = repo.task.borrow().clone();
         let created = repo
@@ -2202,7 +2350,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        update_task(9, form, &user, &repo, &zmq).expect("should unassign");
+        update_task(9, form, &user, &repo, &zmq, &zmq).expect("should unassign");
 
         let stored = repo.task.borrow().clone();
         assert!(stored.assigned_to.is_none());
@@ -2265,7 +2413,7 @@ mod tests {
         .expect("valid form payload");
 
         let outcome =
-            update_task(11, form, &user, &repo, &zmq).expect("expected update to succeed");
+            update_task(11, form, &user, &repo, &zmq, &zmq).expect("expected update to succeed");
 
         assert_eq!(outcome.id, TaskId::new(11).unwrap());
         assert_eq!(outcome.title.as_str(), "Updated");
@@ -2296,7 +2444,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let result = update_task(12, form, &user, &repo, &zmq);
+        let result = update_task(12, form, &user, &repo, &zmq, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -2315,7 +2463,7 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let result = update_task(13, form, &user, &repo, &zmq);
+        let result = update_task(13, form, &user, &repo, &zmq, &zmq);
 
         assert!(matches!(result, Err(ServiceError::NotFound)));
     }
@@ -2505,7 +2653,7 @@ mod tests {
             comment: None,
             assign_self: false,
         };
-        let result = transition_task_status(100, form, &user, &repo, &zmq);
+        let result = transition_task_status(100, form, &user, &repo, &zmq, &zmq);
 
         assert!(matches!(result, Err(ServiceError::Unauthorized)));
     }
@@ -2522,7 +2670,7 @@ mod tests {
             comment: None,
             assign_self: false,
         };
-        let updated = transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+        let updated = transition_task_status(task.id.get(), form, &user, &repo, &zmq, &zmq)
             .expect("should transition status");
 
         assert_eq!(updated.status, TaskStatus::InProgress);
@@ -2544,7 +2692,7 @@ mod tests {
             comment: None,
             assign_self: true,
         };
-        transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+        transition_task_status(task.id.get(), form, &user, &repo, &zmq, &zmq)
             .expect("should transition and assign");
 
         let stored = repo.task.borrow().clone();
@@ -2572,7 +2720,7 @@ mod tests {
             comment: Some("Готово".to_string()),
             assign_self: false,
         };
-        transition_task_status(task.id.get(), form, &user, &repo, &zmq)
+        transition_task_status(task.id.get(), form, &user, &repo, &zmq, &zmq)
             .expect("should transition status with comment");
 
         let events = repo.events.borrow();

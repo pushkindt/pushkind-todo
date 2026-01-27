@@ -9,6 +9,7 @@ use pushkind_emailer::domain::types::{RecipientEmail, RecipientName};
 use pushkind_emailer::models::zmq::ZMQSendEmailMessage;
 
 use crate::domain::{task::Task, user::User};
+use crate::dto::zmq::ZmqTask;
 use crate::services::{ServiceError, ServiceResult};
 
 /// Serialize the email payload and enqueue it for delivery via ZeroMQ.
@@ -28,6 +29,20 @@ where
 
     let payload = serde_json::to_vec(&message).map_err(|err| {
         error!("Failed to serialize email payload: {err}");
+        ServiceError::Internal
+    })?;
+
+    pushkind_common::zmq::ZmqSenderTrait::try_send_bytes(zmq_sender, payload)
+        .map_err(ServiceError::from)
+}
+
+/// Serialize the task snapshot and enqueue it for delivery via ZeroMQ.
+pub(super) fn queue_task_snapshot<Z>(zmq_sender: &Z, task: ZmqTask) -> ServiceResult<()>
+where
+    Z: ZmqSenderExt + ?Sized,
+{
+    let payload = serde_json::to_vec(&task).map_err(|err| {
+        error!("Failed to serialize task snapshot payload: {err}");
         ServiceError::Internal
     })?;
 
