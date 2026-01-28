@@ -1,0 +1,12 @@
+DROP INDEX task_events_task_created_idx;
+DROP INDEX task_assignments_task_hub_assignee_idx;
+DROP INDEX task_assignments_task_hub_assigned_at_idx;
+DROP INDEX tasks_hub_due_date_idx;
+DROP INDEX tasks_hub_priority_idx;
+DROP INDEX tasks_hub_track_idx;
+DROP INDEX tasks_hub_status_idx;
+DROP INDEX tasks_hub_client_id_idx;
+DROP INDEX tasks_hub_assigned_to_idx;
+DROP INDEX tasks_hub_updated_at_idx;
+DROP INDEX clients_hub_name_idx;
+DROP INDEX users_hub_name_idx;
