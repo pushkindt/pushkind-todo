@@ -100,6 +100,8 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     let bind_address = (server_config.address.clone(), server_config.port);
 
     HttpServer::new(move || {
+        use crate::routes::api::api_v1_tasks;
+
         App::new()
             .wrap(message_framework.clone())
             .wrap(IdentityMiddleware::default())
@@ -113,6 +115,7 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .service(Files::new("/assets", "./assets"))
             .service(not_assigned)
+            .service(web::scope("/api").service(api_v1_tasks))
             .service(
                 web::scope("")
                     .wrap(RedirectUnauthorized)

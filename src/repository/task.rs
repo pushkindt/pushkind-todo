@@ -77,6 +77,7 @@ impl TaskReader for DieselRepository {
                     updated_after,
                     hide_terminal_statuses,
                     client_id,
+                    public_id,
                 },
             pagination,
         } = query;
@@ -95,6 +96,9 @@ impl TaskReader for DieselRepository {
             }
             if let Some(client_id) = client_id {
                 items = items.filter(tasks::client_id.eq(Some(client_id.get())));
+            }
+            if let Some(public_id) = public_id.as_ref() {
+                items = items.filter(tasks::public_id.eq(Some(public_id.as_bytes())));
             }
 
             if let Some(track_value) = track.as_ref() {

@@ -6,10 +6,11 @@ use pushkind_common::routes::ensure_role;
 use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::NewEmail;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
-use crate::domain::types::{ClientId, HubId, TaskTrack, UserId};
+use crate::domain::types::{ClientId, HubId, TaskPublicId, TaskTrack, UserId};
 use crate::domain::user::{NewUser, User};
 use crate::dto::zmq::ZmqTask;
 use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
@@ -42,6 +43,7 @@ where
         priority,
         updated_after,
         updated_before,
+        public_id,
     } = query;
 
     let page = page.unwrap_or(1);
@@ -62,11 +64,11 @@ where
     }
 
     let mut track_filter = None;
-    if let Some(track_value) = track
+    if let Some(track) = track
         .as_deref()
-        .map(|value| value.trim())
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        && let Ok(track) = TaskTrack::new(track_value)
+        .and_then(|value| TaskTrack::new(value).ok())
     {
         list_query.filters_mut().track = Some(track.clone());
         track_filter = Some(track);
@@ -119,6 +121,12 @@ where
         list_query.filters_mut().search = Some(value.to_string());
     }
 
+    let public_id = public_id
+        .as_deref()
+        .and_then(|s| TaskPublicId::from_str(s).ok());
+
+    list_query.filters_mut().public_id = public_id;
+
     let new_user: NewUser = user.try_into()?;
     let user = repo.create_or_update_user(&new_user)?;
     let visited_at = user.visited_at;
@@ -165,6 +173,7 @@ where
         updated_after: updated_after_filter,
         updated_before: updated_before_filter,
         client: client_filter,
+        public_id,
     };
 
     let tracks = repo.list_task_tracks(user.hub_id)?;
@@ -915,6 +924,7 @@ mod tests {
             updated_after: Some("2024-05-01".to_string()),
             updated_before: Some("2024-05-31".to_string()),
             client: None,
+            public_id: None,
         };
 
         let expected_email = user.email.clone();
