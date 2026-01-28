@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::client::Client;
 use crate::domain::task::{TaskPriority, TaskStatus};
-use crate::domain::types::{ClientId, TaskId, UserId};
+use crate::domain::types::{ClientId, TaskId, TaskPublicId, UserId};
 use crate::domain::user::User;
 use crate::domain::{task::Task, types::TaskTrack};
 
@@ -40,6 +40,9 @@ pub struct IndexQuery {
     /// Only return tasks updated on or before this date (YYYY-MM-DD).
     #[serde(default, deserialize_with = "empty_string_as_none_fromstr")]
     pub updated_before: Option<String>,
+    /// Only return tasks with this public_id
+    #[serde(default, deserialize_with = "empty_string_as_none_fromstr")]
+    pub public_id: Option<String>,
 }
 
 /// Data required to render the main index tasks page.
@@ -61,6 +64,8 @@ pub struct IndexPageFilters {
     pub updated_after: Option<NaiveDate>,
     /// Updated-before filter echoed back to the template when present.
     pub updated_before: Option<NaiveDate>,
+    /// Public id filter
+    pub public_id: Option<TaskPublicId>,
 }
 
 pub struct IndexPageData {

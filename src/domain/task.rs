@@ -307,6 +307,8 @@ pub struct TaskListFilters {
     pub updated_after: Option<NaiveDateTime>,
     /// Whether tasks in terminal statuses should be excluded.
     pub hide_terminal_statuses: bool,
+    /// Only return tasks with the specific public id
+    pub public_id: Option<TaskPublicId>,
 }
 
 impl TaskListFilters {
@@ -325,6 +327,7 @@ impl TaskListFilters {
             updated_before: None,
             updated_after: None,
             hide_terminal_statuses: false,
+            public_id: None,
         }
     }
 
