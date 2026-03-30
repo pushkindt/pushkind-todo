@@ -103,6 +103,36 @@ by swapping in the `mockall`-based fakes from `src/repository/mock.rs`.
 - `diesel-cli` with SQLite support (`cargo install diesel_cli --no-default-features --features sqlite`)
 - SQLite 3 installed on your system
 
+### Frontend Toolchain (Phase 1)
+
+Phase 1 of the React migration adds a frontend workspace under `frontend/`.
+The application runtime still serves the current Tera UI in this phase, so
+`cargo run` does **not** require a prior frontend build yet.
+
+Install frontend dependencies with:
+
+```bash
+cd frontend
+npm install
+```
+
+Build frontend assets with:
+
+```bash
+cd frontend
+npm run build
+```
+
+The frontend build writes compiled HTML, JavaScript, CSS, and
+`manifest.json` into `assets/dist/`.
+
+Phase 1 note:
+
+- built frontend assets are required for frontend verification commands
+- built frontend assets are not yet used by `GET /`, `GET /task/{task_id}`, or
+  `/na`
+- those routes continue to use the current Tera templates until later phases
+
 ### Configuration
 
 Settings are layered via the [`config`](https://crates.io/crates/config) crate in the following order (later entries override earlier ones):

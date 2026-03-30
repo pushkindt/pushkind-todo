@@ -102,3 +102,11 @@ cargo fmt --all -- --check
 
 By following these principles the generated code will align with the project’s
 architecture, technology stack, and long-term maintainability goals.
+
+## Workflow Requirements
+
+- Always obey `SPEC.md`.
+- For any new work, require both `specs/features/<name>.md` and
+  `plans/<name>.md`.
+- If a change touches architecture, add or update an ADR under
+  `specs/decisions/`.

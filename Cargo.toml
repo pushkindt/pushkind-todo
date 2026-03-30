@@ -74,4 +74,4 @@ uuid = { version = "1.20.0", features = ["v4", "serde"] }
 [dev-dependencies]
 diesel_migrations = "2.3.1"
 mockall = "0.14.0"
-tempfile = "3.24.0"
+tempfile = "3.27.0"

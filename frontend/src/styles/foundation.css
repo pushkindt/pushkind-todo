@@ -1,0 +1,15 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.phase-one-placeholder {
+  min-height: 100vh;
+}
+
+.phase-one-code {
+  font-family: var(--bs-font-monospace, monospace);
+}

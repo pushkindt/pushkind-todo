@@ -44,6 +44,8 @@ pub mod dto;
 pub mod error_conversions;
 #[cfg(feature = "server")]
 pub mod forms;
+#[cfg(feature = "server")]
+pub mod frontend;
 #[cfg(feature = "data")]
 pub mod models;
 #[cfg(feature = "server")]

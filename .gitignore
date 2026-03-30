@@ -1,5 +1,7 @@
 /target
 .env
 app.*
-.agent/
 tarpaulin-report*
+.codex
+frontend/node_modules/
+assets/dist/
