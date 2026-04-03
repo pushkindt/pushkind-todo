@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use log::error;
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::services::errors::{ServiceError, ServiceResult};
 use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
 use pushkind_emailer::domain::types::{RecipientEmail, RecipientName};
@@ -10,7 +11,6 @@ use pushkind_emailer::models::zmq::ZMQSendEmailMessage;
 
 use crate::domain::{task::Task, user::User};
 use crate::dto::zmq::ZmqTask;
-use crate::services::{ServiceError, ServiceResult};
 
 /// Serialize the email payload and enqueue it for delivery via ZeroMQ.
 pub(super) fn queue_email<Z>(

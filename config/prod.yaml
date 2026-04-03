@@ -1,4 +1,6 @@
-domain: pushkind.com
-port: 9010
-auth_service_url: https://users.pushkind.com
-crm_service_url: https://crm.pushkind.com
+server:
+  port: 9010
+app:
+  domain: pushkind.com
+  auth_service_url: https://users.pushkind.com
+  crm_service_url: https://crm.pushkind.com

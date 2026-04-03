@@ -1,116 +1,34 @@
-//! UI routes handling the main index, task creation, and file upload workflows.
-use actix_multipart::form::MultipartForm;
-use actix_web::{HttpResponse, Responder, get, post, web};
-use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
+//! UI route serving the main React document.
+use std::path::Path;
+
+use actix_web::{Either, HttpResponse, Responder, get};
 use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::models::config::CommonServerConfig;
-use pushkind_common::routes::{base_context, redirect, render_template};
-use tera::Tera;
+use pushkind_common::routes::{ensure_role, redirect};
+use pushkind_common::services::errors::ServiceError;
 
-use crate::dto::main::IndexQuery;
-use crate::forms::main::{AddTaskForm, UploadTasksForm};
-use crate::models::config::ZmqSenders;
-use crate::repository::DieselRepository;
-use crate::services::{ServiceError, main as main_service};
+use crate::SERVICE_ACCESS_ROLE;
+use crate::frontend::{FRONTEND_DIST_DIR, FRONTEND_INDEX_DOCUMENT, open_frontend_html};
 
-/// Display the main index page showing tasks, filters, and flash messages.
+/// Display the React-backed main index page after access checks succeed.
 #[get("/")]
-pub async fn show_index(
-    params: web::Query<IndexQuery>,
-    user: AuthenticatedUser,
-    repo: web::Data<DieselRepository>,
-    flash_messages: IncomingFlashMessages,
-    server_config: web::Data<CommonServerConfig>,
-    tera: web::Data<Tera>,
-) -> impl Responder {
-    match main_service::load_index_page(params.into_inner(), &user, repo.get_ref()) {
-        Ok(data) => {
-            let mut context = base_context(
-                &flash_messages,
-                &user,
-                "index",
-                &server_config.auth_service_url,
-            );
-            context.insert("tasks", &data.tasks);
-            context.insert("templates", &data.tasks); // temporary alias while templates migrate
-            context.insert("filters", &data.filters);
-            context.insert("users", &data.users);
-            context.insert("clients", &data.clients);
-            context.insert("recently_updated_task_ids", &data.recently_updated_task_ids);
-            context.insert("tracks", &data.tracks);
-            render_template(&tera, "main/index.html", &context)
-        }
+pub async fn show_index(user: AuthenticatedUser) -> impl Responder {
+    match ensure_role(&user, SERVICE_ACCESS_ROLE) {
+        Ok(_) => {}
         Err(ServiceError::Unauthorized) => {
-            FlashMessage::error("Недостаточно прав.").send();
-            redirect("/na")
+            return Either::Right(redirect("/na"));
         }
         Err(err) => {
-            log::error!("Failed to list tasks: {err}");
-            HttpResponse::InternalServerError().finish()
+            log::error!("Failed to authorize list page access: {err}");
+            return Either::Right(HttpResponse::InternalServerError().finish());
         }
     }
-}
 
-/// Handle task creation submissions and provide flash feedback.
-#[post("/task/add")]
-pub async fn add_task(
-    user: AuthenticatedUser,
-    repo: web::Data<DieselRepository>,
-    zmq_senders: web::Data<ZmqSenders>,
-    web::Form(form): web::Form<AddTaskForm>,
-) -> impl Responder {
-    let zmq_senders = zmq_senders.get_ref();
-    match main_service::add_task(
-        form,
-        &user,
-        repo.get_ref(),
-        &zmq_senders.emailer,
-        &zmq_senders.tasks,
-    ) {
-        Ok(_) => {
-            FlashMessage::success("Задача добавлена.").send();
-            redirect("/")
-        }
-        Err(ServiceError::Unauthorized) => {
-            FlashMessage::error("Недостаточно прав.").send();
-            redirect("/na")
-        }
-        Err(ServiceError::Form(message)) => {
-            FlashMessage::error(message).send();
-            redirect("/")
-        }
+    let index_document = Path::new(FRONTEND_DIST_DIR).join(FRONTEND_INDEX_DOCUMENT);
+    match open_frontend_html(&index_document).await {
+        Ok(document) => Either::Left(document),
         Err(err) => {
-            log::error!("Failed to add a task: {err}");
-            FlashMessage::error("Ошибка при добавлении задачи").send();
-            redirect("/")
-        }
-    }
-}
-
-/// Accept a CSV upload of tasks, process it, and flash results.
-#[post("/tasks/upload")]
-pub async fn tasks_upload(
-    user: AuthenticatedUser,
-    repo: web::Data<DieselRepository>,
-    MultipartForm(form): MultipartForm<UploadTasksForm>,
-) -> impl Responder {
-    match main_service::upload_tasks(form, &user, repo.get_ref()) {
-        Ok(created_count) => {
-            FlashMessage::success(format!("Добавлено задач: {created_count}")).send();
-            redirect("/")
-        }
-        Err(ServiceError::Unauthorized) => {
-            FlashMessage::error("Недостаточно прав.").send();
-            redirect("/na")
-        }
-        Err(ServiceError::Form(message)) => {
-            FlashMessage::error(message).send();
-            redirect("/")
-        }
-        Err(err) => {
-            log::error!("Failed to add tasks: {err}");
-            FlashMessage::error("Ошибка при добавлении задач").send();
-            redirect("/")
+            log::error!("Failed to open built index document: {err}");
+            Either::Right(HttpResponse::InternalServerError().finish())
         }
     }
 }

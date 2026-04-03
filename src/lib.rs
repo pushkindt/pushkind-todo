@@ -9,9 +9,7 @@ use actix_session::{SessionMiddleware, storage::CookieSessionStore};
 #[cfg(feature = "server")]
 use actix_web::cookie::Key;
 #[cfg(feature = "server")]
-use actix_web::{App, HttpServer, middleware, web};
-#[cfg(feature = "server")]
-use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
+use actix_web::{App, HttpServer, dev::Server, middleware, web};
 #[cfg(feature = "server")]
 use pushkind_common::db::establish_connection_pool;
 #[cfg(feature = "server")]
@@ -19,22 +17,28 @@ use pushkind_common::middleware::RedirectUnauthorized;
 #[cfg(feature = "server")]
 use pushkind_common::models::config::CommonServerConfig;
 #[cfg(feature = "server")]
-use pushkind_common::routes::{logout, not_assigned};
+use pushkind_common::routes::logout;
 #[cfg(feature = "server")]
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
 #[cfg(feature = "server")]
-use tera::Tera;
+use std::net::TcpListener;
 
 #[cfg(feature = "server")]
-use crate::models::config::{ServerConfig, ZmqSenders};
+use crate::models::config::{AppConfig, Settings, ZmqSenders};
 #[cfg(feature = "server")]
 use crate::repository::DieselRepository;
 #[cfg(feature = "server")]
-use crate::routes::main::{add_task, show_index, tasks_upload};
-#[cfg(feature = "server")]
-use crate::routes::task::{
-    add_task_comment, delete_task, quick_update_task_status, show_task, task_modal, update_task,
+use crate::routes::api::{
+    api_v1_add_task_comment, api_v1_clients, api_v1_create_task, api_v1_delete_task, api_v1_iam,
+    api_v1_no_access, api_v1_task, api_v1_tasks, api_v1_tracks, api_v1_update_task,
+    api_v1_update_task_status, api_v1_upload_tasks, api_v1_users,
 };
+#[cfg(feature = "server")]
+use crate::routes::aux::not_assigned;
+#[cfg(feature = "server")]
+use crate::routes::main::show_index;
+#[cfg(feature = "server")]
+use crate::routes::task::show_task;
 
 #[cfg(feature = "data")]
 pub mod domain;
@@ -44,6 +48,8 @@ pub mod dto;
 pub mod error_conversions;
 #[cfg(feature = "server")]
 pub mod forms;
+#[cfg(feature = "server")]
+pub mod frontend;
 #[cfg(feature = "data")]
 pub mod models;
 #[cfg(feature = "server")]
@@ -59,19 +65,26 @@ pub mod services;
 pub const SERVICE_ACCESS_ROLE: &str = "todo";
 
 #[cfg(feature = "server")]
-pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
+pub async fn run(settings: Settings) -> std::io::Result<()> {
+    let bind_address = (settings.server.address.clone(), settings.server.port);
+    let listener = TcpListener::bind(bind_address)?;
+
+    build_server(listener, settings.app)?.await
+}
+
+#[cfg(feature = "server")]
+pub fn build_server(listener: TcpListener, app_config: AppConfig) -> std::io::Result<Server> {
     let common_config = CommonServerConfig {
-        auth_service_url: server_config.auth_service_url.clone(),
-        secret: server_config.secret.clone(),
+        auth_service_url: app_config.auth_service_url.clone(),
+        secret: app_config.secret.clone(),
     };
 
     // Start background ZeroMQ senders used for outbound notifications and integration events.
-    let emailer_sender = ZmqSender::start(ZmqSenderOptions::pub_default(
-        &server_config.zmq_emailer_pub,
-    ))
-    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
+    let emailer_sender =
+        ZmqSender::start(ZmqSenderOptions::pub_default(&app_config.zmq_emailer_pub))
+            .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
 
-    let task_sender = ZmqSender::start(ZmqSenderOptions::pub_default(&server_config.zmq_tasks_pub))
+    let task_sender = ZmqSender::start(ZmqSenderOptions::pub_default(&app_config.zmq_tasks_pub))
         .map_err(|e| {
             std::io::Error::other(format!("Failed to start ZMQ task-events sender: {e}"))
         })?;
@@ -82,61 +95,58 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     });
 
     // Establish Diesel connection pool for the SQLite database.
-    let pool = establish_connection_pool(&server_config.database_url).map_err(|e| {
+    let pool = establish_connection_pool(&app_config.database_url).map_err(|e| {
         std::io::Error::other(format!("Failed to establish database connection: {e}"))
     })?;
 
     let repo = DieselRepository::new(pool);
 
-    // Keys and stores for identity, sessions, and flash messages.
-    let secret_key = Key::from(server_config.secret.as_bytes());
+    // Key used for identity and session cookies.
+    let secret_key = Key::from(app_config.secret.as_bytes());
 
-    let message_store = CookieMessageStore::builder(secret_key.clone()).build();
-    let message_framework = FlashMessagesFramework::builder(message_store).build();
-
-    let tera = Tera::new(&server_config.templates_dir)
-        .map_err(|e| std::io::Error::other(format!("Template parsing error(s): {e}")))?;
-
-    let bind_address = (server_config.address.clone(), server_config.port);
-
-    HttpServer::new(move || {
-        use crate::routes::api::api_v1_tasks;
-
+    let server = HttpServer::new(move || {
         App::new()
-            .wrap(message_framework.clone())
             .wrap(IdentityMiddleware::default())
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
                     .cookie_secure(false) // set to true in prod
-                    .cookie_domain(Some(format!(".{}", server_config.domain)))
+                    .cookie_domain(Some(format!(".{}", app_config.domain)))
                     .build(),
             )
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
             .service(Files::new("/assets", "./assets"))
             .service(not_assigned)
-            .service(web::scope("/api").service(api_v1_tasks))
+            .service(
+                web::scope("/api")
+                    .service(api_v1_iam)
+                    .service(api_v1_no_access)
+                    .service(api_v1_tasks)
+                    .service(api_v1_create_task)
+                    .service(api_v1_upload_tasks)
+                    .service(api_v1_task)
+                    .service(api_v1_update_task)
+                    .service(api_v1_update_task_status)
+                    .service(api_v1_add_task_comment)
+                    .service(api_v1_delete_task)
+                    .service(api_v1_users)
+                    .service(api_v1_clients)
+                    .service(api_v1_tracks),
+            )
             .service(
                 web::scope("")
                     .wrap(RedirectUnauthorized)
                     .service(show_index)
-                    .service(add_task)
-                    .service(tasks_upload)
                     .service(show_task)
-                    .service(task_modal)
-                    .service(add_task_comment)
-                    .service(update_task)
-                    .service(quick_update_task_status)
-                    .service(delete_task)
                     .service(logout),
             )
-            .app_data(web::Data::new(tera.clone()))
             .app_data(web::Data::new(repo.clone()))
-            .app_data(web::Data::new(server_config.clone()))
+            .app_data(web::Data::new(app_config.clone()))
             .app_data(web::Data::new(common_config.clone()))
             .app_data(zmq_senders.clone())
     })
-    .bind(bind_address)?
-    .run()
-    .await
+    .listen(listener)?
+    .run();
+
+    Ok(server)
 }

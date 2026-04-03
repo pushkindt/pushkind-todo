@@ -1,10 +1,11 @@
 # pushkind-todo
 
-`pushkind-todo` is the task management service that powers Pushkind hubs. It offers
-server-rendered management pages, CSV imports, and REST-style endpoints for
-creating, assigning, and tracking work. The project is implemented in Rust on top
-of Actix Web, Diesel, and Tera and integrates tightly with the shared
-`pushkind-common` crate for authentication, configuration, and reusable UI helpers.
+`pushkind-todo` is the task management service that powers Pushkind hubs. It serves
+React-built task pages, CSV imports, and JSON endpoints for creating, assigning,
+and tracking work. The project is implemented in Rust on top of Actix Web and
+Diesel, with a Vite/React frontend, and integrates tightly with the shared
+`pushkind-common` crate for authentication, configuration, and reusable runtime
+helpers.
 
 Comprehensive API documentation generated with `cargo doc` is published at
 [pushkindt.github.io/pushkind-todo](https://pushkindt.github.io/pushkind-todo/).
@@ -18,7 +19,7 @@ Comprehensive API documentation generated with `cargo doc` is published at
 - **Task detail views with history** – Each task page surfaces metadata,
   author/assignee information, and a chronological event stream so teams can audit
   status changes, assignment churn, and metadata updates.
-- **Inline task editing** – An Actix-powered modal lets users update titles,
+- **Inline task editing** – The React task page lets users update titles,
   descriptions, due dates, statuses, and assignments in one submit, while the
   service layer emits structured events for downstream consumers.
 - **Quick task capture** – The home page provides a streamlined form for creating
@@ -30,10 +31,11 @@ Comprehensive API documentation generated with `cargo doc` is published at
 - **Collaborative commentary** – Team members can add HTML-sanitised comments to a
   task, generating timeline events that keep conversations alongside the work.
 - **Task archiving** – Users can delete tasks they no longer need; the action is
-  validated against hub ownership and surfaces success feedback via flash
-  messages.
-- **JSON task feed** – The `/v1/tasks` endpoint exposes the same filtered task
-  list over JSON for integrations that need a machine-readable snapshot.
+  validated against hub ownership and exposed through the same JSON mutation
+  contract used by the frontend.
+- **Typed JSON contracts** – The `/api/v1/*` endpoints expose the shell, task
+  collection, task details, lookups, and mutation results in stable JSON shapes
+  consumed by the React frontend and external integrations.
 - **Email notifications** – The service publishes a ZeroMQ message for email
   delivery whenever a task is created or a task event occurs, notifying the
   author, the assignee, and every participant who has generated task events so
@@ -45,7 +47,7 @@ Comprehensive API documentation generated with `cargo doc` is published at
   controls. Tasks are sorted by their `updated_at` timestamp with the most
   recently updated first. Entries whose `updated_at` is more recent than the
   current user's `visited_at` are highlighted so users can quickly spot changes
-  since their last visit. The page also includes the quick-create form for
+  since their last visit. The React page also includes the quick-create form for
   adding new tasks, and clicking a task row opens its detail page.
 - **Task details page** – Shows the full task metadata alongside editing
   controls for the title, description, deadline, assignee, and status. Users can
@@ -74,9 +76,9 @@ exercised and tested without going through the web framework:
 - **Forms (`src/forms`)** – `serde`/`validator` powered structs that handle
   request payload validation, CSV parsing, and transformation into domain types.
 - **Routes (`src/routes`)** – Actix Web handlers that wire HTTP requests into the
-  service layer and render Tera templates or redirect with flash messages.
-- **Templates (`templates/`)** – Server-rendered UI built with Tera and
-  Bootstrap 5, backed by sanitized HTML rendered via `ammonia` when necessary.
+  service layer, return JSON contracts, and serve the built frontend documents.
+- **Frontend (`frontend/`)** – Vite-built React entries for the list, task, and
+  no-access pages, compiled into `assets/dist/` for the Rust server to serve.
 
 Because the repository traits live in `src/repository/mod.rs`, service functions
 accept generic parameters that implement those traits. This makes unit tests easy
@@ -85,10 +87,10 @@ by swapping in the `mockall`-based fakes from `src/repository/mock.rs`.
 ## Technology Stack
 
 - Rust 2024 edition
-- [Actix Web](https://actix.rs/) with identity, session, and flash message
-  middleware
+- [Actix Web](https://actix.rs/) with identity and session middleware
 - [Diesel](https://diesel.rs/) ORM with SQLite and connection pooling via r2d2
-- [Tera](https://tera.netlify.app/) templates styled with Bootstrap 5.3
+- [React](https://react.dev/) and [Vite](https://vite.dev/) for the user-facing
+  task pages
 - [`pushkind-common`](https://github.com/pushkindt/pushkind-common) shared crate
   for authentication guards, configuration, database helpers, and reusable
   patterns
@@ -103,6 +105,30 @@ by swapping in the `mockall`-based fakes from `src/repository/mock.rs`.
 - `diesel-cli` with SQLite support (`cargo install diesel_cli --no-default-features --features sqlite`)
 - SQLite 3 installed on your system
 
+### Frontend Toolchain
+
+Install frontend dependencies with:
+
+```bash
+cd frontend
+npm install
+```
+
+Build frontend assets with:
+
+```bash
+cd frontend
+npm run build
+```
+
+The frontend build writes compiled HTML, JavaScript, CSS, and
+`manifest.json` into `assets/dist/`.
+
+Built frontend assets are required for `GET /`, `GET /task/{task_id}`, and
+`GET /na`. If the expected document under `assets/dist/app/` is missing, the
+corresponding page returns `503 Service Unavailable` until you run
+`cd frontend && npm run build`.
+
 ### Configuration
 
 Settings are layered via the [`config`](https://crates.io/crates/config) crate in the following order (later entries override earlier ones):
@@ -115,14 +141,14 @@ Key settings you may want to override:
 
 | Environment variable | Description | Default |
 | --- | --- | --- |
-| `APP_SECRET` | 64-byte secret used to sign cookies and flash messages | _required_ |
+| `APP_SECRET` | 64-byte secret used to sign identity and session cookies | _required_ |
 | `APP_DATABASE_URL` | Path to the SQLite database file | `app.db` |
 | `APP_ADDRESS` | Interface to bind | `127.0.0.1` |
 | `APP_PORT` | HTTP port | `8080` when `APP_ENV=local` |
 | `APP_DOMAIN` | Cookie domain (without protocol) | `test.me` when `APP_ENV=local` |
-| `APP_TEMPLATES_DIR` | Glob pattern for templates consumed by Tera | `templates/**/*` |
 | `APP_ZMQ_EMAILER_PUB` | ZeroMQ PUB endpoint for outgoing email events | `tcp://127.0.0.1:5557` |
 | `APP_AUTH_SERVICE_URL` | Base URL of the Pushkind authentication service | _required_ |
+| `APP_CRM_SERVICE_URL` | Base URL of the Pushkind CRM service | _required_ |
 
 Switch to the production profile with `APP_ENV=prod` or provide your own
 `config/{env}.yaml`. Environment variables always win over YAML values, so a
@@ -151,10 +177,10 @@ cargo run
 ```
 
 The server listens on `http://127.0.0.1:8080` by default (from
-`config/local.yaml`) and serves static
-assets from `./assets` in addition to the Tera-powered HTML pages. Authentication
-and authorization are enforced via the Pushkind auth service and the
-`SERVICE_ACCESS_ROLE` constant.
+`config/local.yaml`) and serves static assets from `./assets`, including the
+built frontend documents under `assets/dist/`. Authentication and authorization
+are enforced via the Pushkind auth service and the `SERVICE_ACCESS_ROLE`
+constant.
 
 ## Quality Gates
 

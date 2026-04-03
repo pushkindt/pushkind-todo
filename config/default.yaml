@@ -1,10 +1,11 @@
-domain: ""
-address: 127.0.0.1
-port: 80
-database_url: app.db
-zmq_emailer_pub: tcp://127.0.0.1:5557
-templates_dir: templates/**/*
-secret: env::APP_SECRET
-auth_service_url: ""
-crm_service_url: ""
-zmq_tasks_pub: tcp://127.0.0.1:5563
+server:
+  address: 127.0.0.1
+  port: 80
+app:
+  domain: ""
+  database_url: app.db
+  zmq_emailer_pub: tcp://127.0.0.1:5557
+  secret: env::APP_SECRET
+  auth_service_url: ""
+  crm_service_url: ""
+  zmq_tasks_pub: tcp://127.0.0.1:5563
