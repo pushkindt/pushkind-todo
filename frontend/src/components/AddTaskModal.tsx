@@ -22,6 +22,15 @@ type AddTaskModalProps = {
   onMutationSuccess: (message: string) => void;
 };
 
+export function unmatchedAssigneeError(
+  assigneeInput: string,
+  selectedAssignee?: AssigneeOption,
+) {
+  return assigneeInput.trim() && !selectedAssignee
+    ? "Выберите исполнителя из списка."
+    : undefined;
+}
+
 function toFieldErrorMap(
   fieldErrors: Array<{ field: string; message: string }>,
 ): Record<string, string> {
@@ -247,6 +256,16 @@ export function AddTaskModal({
         onSubmit={async (event) => {
           event.preventDefault();
 
+          const assigneeError = unmatchedAssigneeError(
+            assigneeInput,
+            selectedAssignee,
+          );
+          if (assigneeError) {
+            setTaskFieldErrors({ name: assigneeError });
+            setTaskErrorMessage("Ошибка валидации формы.");
+            return;
+          }
+
           const form = new URLSearchParams();
           form.set("title", title);
           form.set("priority", priority);
@@ -446,6 +465,12 @@ export function AddTaskModal({
               onChange={(event) => {
                 const nextValue = event.target.value;
                 setAssigneeInput(nextValue);
+                setTaskFieldErrors((current) => {
+                  const nextErrors = { ...current };
+                  delete nextErrors.name;
+                  delete nextErrors.email;
+                  return nextErrors;
+                });
 
                 const matchedOption = assigneeOptions.find(
                   (option) => formatAssigneeOption(option) === nextValue,
