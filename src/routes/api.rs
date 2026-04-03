@@ -13,7 +13,7 @@ use crate::forms::task::{
     QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
     UpdateTaskForm, UpdateTaskPayload,
 };
-use crate::models::config::ServerConfig;
+use crate::models::config::AppConfig;
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::routes::{form_error_response, mutation_error_response, mutation_success_response};
@@ -71,14 +71,14 @@ pub async fn api_v1_task(
     task_id: web::Path<i32>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
-    server_config: web::Data<ServerConfig>,
+    app_config: web::Data<AppConfig>,
 ) -> impl Responder {
     match api_service::get_task_details_data(task_id.into_inner(), &user, repo.get_ref()) {
         Ok(mut response) => {
             if let Some(client) = response.client.as_mut() {
                 client.url = Some(format!(
                     "{}/?public_id={}",
-                    server_config.crm_service_url, client.public_id
+                    app_config.crm_service_url, client.public_id
                 ));
             }
 

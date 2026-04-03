@@ -4,7 +4,7 @@ use std::env;
 use config::Config;
 use dotenvy::dotenv;
 
-use pushkind_todo::{models::config::ServerConfig, run};
+use pushkind_todo::{models::config::Settings, run};
 
 #[actix_web::main]
 async fn main() {
@@ -33,15 +33,15 @@ async fn main() {
         }
     };
 
-    let server_config = match settings.try_deserialize::<ServerConfig>() {
-        Ok(server_config) => server_config,
+    let settings = match settings.try_deserialize::<Settings>() {
+        Ok(settings) => settings,
         Err(err) => {
             log::error!("Error loading server config: {}", err);
             std::process::exit(1);
         }
     };
 
-    match run(server_config).await {
+    match run(settings).await {
         Ok(_) => log::info!("Server started"),
         Err(err) => {
             log::error!("Error starting server: {}", err);

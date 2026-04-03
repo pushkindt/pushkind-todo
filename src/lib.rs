@@ -9,7 +9,7 @@ use actix_session::{SessionMiddleware, storage::CookieSessionStore};
 #[cfg(feature = "server")]
 use actix_web::cookie::Key;
 #[cfg(feature = "server")]
-use actix_web::{App, HttpServer, middleware, web};
+use actix_web::{App, HttpServer, dev::Server, middleware, web};
 #[cfg(feature = "server")]
 use pushkind_common::db::establish_connection_pool;
 #[cfg(feature = "server")]
@@ -20,9 +20,11 @@ use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::logout;
 #[cfg(feature = "server")]
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
+#[cfg(feature = "server")]
+use std::net::TcpListener;
 
 #[cfg(feature = "server")]
-use crate::models::config::{ServerConfig, ZmqSenders};
+use crate::models::config::{AppConfig, Settings, ZmqSenders};
 #[cfg(feature = "server")]
 use crate::repository::DieselRepository;
 #[cfg(feature = "server")]
@@ -63,19 +65,26 @@ pub mod services;
 pub const SERVICE_ACCESS_ROLE: &str = "todo";
 
 #[cfg(feature = "server")]
-pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
+pub async fn run(settings: Settings) -> std::io::Result<()> {
+    let bind_address = (settings.server.address.clone(), settings.server.port);
+    let listener = TcpListener::bind(bind_address)?;
+
+    build_server(listener, settings.app)?.await
+}
+
+#[cfg(feature = "server")]
+pub fn build_server(listener: TcpListener, app_config: AppConfig) -> std::io::Result<Server> {
     let common_config = CommonServerConfig {
-        auth_service_url: server_config.auth_service_url.clone(),
-        secret: server_config.secret.clone(),
+        auth_service_url: app_config.auth_service_url.clone(),
+        secret: app_config.secret.clone(),
     };
 
     // Start background ZeroMQ senders used for outbound notifications and integration events.
-    let emailer_sender = ZmqSender::start(ZmqSenderOptions::pub_default(
-        &server_config.zmq_emailer_pub,
-    ))
-    .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
+    let emailer_sender =
+        ZmqSender::start(ZmqSenderOptions::pub_default(&app_config.zmq_emailer_pub))
+            .map_err(|e| std::io::Error::other(format!("Failed to start ZMQ email sender: {e}")))?;
 
-    let task_sender = ZmqSender::start(ZmqSenderOptions::pub_default(&server_config.zmq_tasks_pub))
+    let task_sender = ZmqSender::start(ZmqSenderOptions::pub_default(&app_config.zmq_tasks_pub))
         .map_err(|e| {
             std::io::Error::other(format!("Failed to start ZMQ task-events sender: {e}"))
         })?;
@@ -86,24 +95,22 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     });
 
     // Establish Diesel connection pool for the SQLite database.
-    let pool = establish_connection_pool(&server_config.database_url).map_err(|e| {
+    let pool = establish_connection_pool(&app_config.database_url).map_err(|e| {
         std::io::Error::other(format!("Failed to establish database connection: {e}"))
     })?;
 
     let repo = DieselRepository::new(pool);
 
     // Key used for identity and session cookies.
-    let secret_key = Key::from(server_config.secret.as_bytes());
+    let secret_key = Key::from(app_config.secret.as_bytes());
 
-    let bind_address = (server_config.address.clone(), server_config.port);
-
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         App::new()
             .wrap(IdentityMiddleware::default())
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
                     .cookie_secure(false) // set to true in prod
-                    .cookie_domain(Some(format!(".{}", server_config.domain)))
+                    .cookie_domain(Some(format!(".{}", app_config.domain)))
                     .build(),
             )
             .wrap(middleware::Compress::default())
@@ -134,11 +141,12 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
                     .service(logout),
             )
             .app_data(web::Data::new(repo.clone()))
-            .app_data(web::Data::new(server_config.clone()))
+            .app_data(web::Data::new(app_config.clone()))
             .app_data(web::Data::new(common_config.clone()))
             .app_data(zmq_senders.clone())
     })
-    .bind(bind_address)?
-    .run()
-    .await
+    .listen(listener)?
+    .run();
+
+    Ok(server)
 }

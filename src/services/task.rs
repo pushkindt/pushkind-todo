@@ -31,6 +31,26 @@ use super::notifications;
 use crate::dto::task::{TaskDetails, TaskEventWithAuthor};
 
 /// Load a task and its events for the provided user, enriching with user data.
+pub fn verify_task_page_access<R>(
+    task_id: i32,
+    user: &AuthenticatedUser,
+    repo: &R,
+) -> ServiceResult<()>
+where
+    R: TaskReader + ?Sized,
+{
+    ensure_role(user, SERVICE_ACCESS_ROLE)?;
+
+    let hub_id = HubId::new(user.hub_id)?;
+    let task_id = TaskId::new(task_id)?;
+
+    repo.get_task_by_id(task_id, hub_id)?
+        .ok_or(ServiceError::NotFound)?;
+
+    Ok(())
+}
+
+/// Load a task and its events for the provided user, enriching with user data.
 pub fn load_task_details<R>(
     task_id: i32,
     user: &AuthenticatedUser,

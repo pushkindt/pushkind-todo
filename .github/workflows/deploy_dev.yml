@@ -12,17 +12,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+      - name: Build frontend assets
+        working-directory: ./frontend
+        run: npm run build
       - uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --all-features
       - uses: actions/upload-artifact@v4
         with:
+          name: pushkind-todo-frontend-dist
+          path: ./assets/dist
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
           name: pushkind-todo
           path: ./target/release/pushkind-todo
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -32,20 +49,23 @@ jobs:
         with:
           name: pushkind-todo
           path: ./target/release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: pushkind-todo-frontend-dist
+          path: ./assets/dist/
       - name: Install SSH Key
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ secrets.CICD_PRIVATE_KEY }}
-          name: id_rsa # optional
+          name: id_rsa
           known_hosts: ${{ secrets.CICD_KNOWN_HOSTS }}
-          if_key_exists: fail # replace / ignore / fail; optional (defaults to fail)
+          if_key_exists: fail
       - name: Deploy
         run: |
           ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl stop pushkind-todo.service"
           scp ./target/release/pushkind-todo cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./config/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./assets/ cicd@todo.pushkind.com:/var/www10/html/
-          scp -r ./templates/ cicd@todo.pushkind.com:/var/www10/html/
           scp -r ./migrations/ cicd@todo.pushkind.com:/var/www10/html/
           ssh cicd@todo.pushkind.com "cd /var/www10/html/ && /home/cicd/.cargo/bin/diesel migration run --database-url app.db"
           ssh cicd@todo.pushkind.com "sudo /usr/bin/systemctl start pushkind-todo.service"
