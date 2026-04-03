@@ -9,7 +9,7 @@ use crate::domain::{
     task::{TaskPriority, TaskStatus},
     types::{
         ClientName, ClientPublicId, HubId, TaskComment, TaskDescription, TaskTitle, TaskTrack,
-        TypeConstraintError, UserEmail, UserName,
+        UserEmail, UserName,
     },
     user::NewUser,
 };
@@ -19,7 +19,8 @@ use crate::forms::FormError;
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateTaskForm {
     /// Updated task title provided by the user.
-    #[validate(length(min = 1))]
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Укажите название задачи."))]
     pub title: String,
     /// Updated task description in HTML rendered from Markdown.
     #[serde(default, deserialize_with = "empty_string_as_none")]
@@ -28,11 +29,15 @@ pub struct UpdateTaskForm {
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub due_date: Option<String>,
     /// Updated status selected in the form.
-    pub status: TaskStatus,
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Выберите статус задачи."))]
+    pub status: String,
     /// Updated track value submitted in the form.
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub track: Option<String>,
     /// Updated priority level submitted in the form.
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Выберите приоритет задачи."))]
     pub priority: String,
     /// Assignee data captured by the modal.
     #[serde(flatten, default)]
@@ -44,20 +49,20 @@ pub struct UpdateTaskForm {
 
 #[derive(Debug, Default, Deserialize, Validate)]
 pub struct AssigneeSelectionForm {
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Укажите имя исполнителя."))]
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub name: Option<String>,
-    #[validate(email)]
+    #[validate(email(message = "Укажите корректный email исполнителя."))]
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub email: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Validate)]
 pub struct ClientSelectionForm {
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Укажите клиента."))]
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub client_name: Option<String>,
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Укажите корректный идентификатор клиента."))]
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub client_public_id: Option<String>,
 }
@@ -79,7 +84,7 @@ pub struct UpdateTaskPayload {
     pub due_date: Option<NaiveDate>,
     /// Optional assignee selected in the form.
     pub assignee: Option<AssigneeSelectionPayload>,
-    /// Optional assignee selected in the form.
+    /// Optional client selected in the form.
     pub client: Option<ClientSelectionPayload>,
 }
 
@@ -95,9 +100,9 @@ pub struct AssigneeSelectionPayload {
 /// Client data captured by the modal when assigning a task.
 #[derive(Debug, Clone)]
 pub struct ClientSelectionPayload {
-    /// Display name for the selected user.
+    /// Display name for the selected client.
     pub name: ClientName,
-    /// Email address for the selected user.
+    /// Public identifier for the selected client.
     pub public_id: ClientPublicId,
 }
 
@@ -105,19 +110,23 @@ pub struct ClientSelectionPayload {
 #[derive(Debug, Deserialize, Validate)]
 pub struct TaskCommentForm {
     /// Free-form comment body written by the user.
-    #[validate(length(min = 1))]
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Введите комментарий."))]
     pub message: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct TaskCommentPayload {
     pub message: TaskComment,
 }
 
 /// Form payload used for quick status actions on the task page.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct QuickTaskStatusForm {
     /// Desired status to set on the task.
-    pub status: TaskStatus,
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Выберите статус задачи."))]
+    pub status: String,
     /// Optional comment to record alongside the status change.
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub comment: Option<String>,
@@ -126,6 +135,7 @@ pub struct QuickTaskStatusForm {
     pub assign_self: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct QuickTaskStatusPayload {
     /// Desired status to set on the task.
     pub status: TaskStatus,
@@ -139,6 +149,8 @@ impl TryFrom<QuickTaskStatusForm> for QuickTaskStatusPayload {
     type Error = FormError;
 
     fn try_from(form: QuickTaskStatusForm) -> Result<Self, Self::Error> {
+        form.validate().map_err(FormError::Validation)?;
+
         let QuickTaskStatusForm {
             status,
             comment,
@@ -146,11 +158,11 @@ impl TryFrom<QuickTaskStatusForm> for QuickTaskStatusPayload {
         } = form;
 
         Ok(Self {
-            status,
+            status: TaskStatus::try_from(status.as_str()).map_err(|_| FormError::InvalidStatus)?,
             comment: comment
                 .map(TaskComment::new)
                 .transpose()
-                .map_err(|_| FormError::InvalidComment)?,
+                .map_err(|_| FormError::InvalidQuickComment)?,
             assign_self,
         })
     }
@@ -163,7 +175,8 @@ impl TryFrom<TaskCommentForm> for TaskCommentPayload {
         form.validate().map_err(FormError::Validation)?;
 
         Ok(Self {
-            message: TaskComment::new(form.message).map_err(|_| FormError::InvalidComment)?,
+            message: TaskComment::new(form.message)
+                .map_err(|_| FormError::InvalidCommentMessage)?,
         })
     }
 }
@@ -196,7 +209,7 @@ impl TryFrom<UpdateTaskForm> for UpdateTaskPayload {
                 .map_err(|_| FormError::InvalidTrack)?,
             priority: TaskPriority::try_from(priority.as_str())
                 .map_err(|_| FormError::InvalidPriority)?,
-            status,
+            status: TaskStatus::try_from(status.as_str()).map_err(|_| FormError::InvalidStatus)?,
             due_date: due_date
                 .map(|value| NaiveDate::parse_from_str(value.as_str(), "%Y-%m-%d"))
                 .transpose()
@@ -209,49 +222,97 @@ impl TryFrom<UpdateTaskForm> for UpdateTaskPayload {
 
 impl AssigneeSelectionPayload {
     /// Convert the selection into a new user payload.
-    pub fn into_domain(self, hub_id: HubId) -> Result<NewUser, TypeConstraintError> {
-        let name = UserName::new(self.name)?;
-        let email = UserEmail::new(self.email)?;
-
-        Ok(NewUser::new(hub_id, name, email))
+    pub fn into_domain(self, hub_id: HubId) -> NewUser {
+        NewUser::new(hub_id, self.name, self.email)
     }
 }
 
 impl TryFrom<AssigneeSelectionForm> for Option<AssigneeSelectionPayload> {
     type Error = FormError;
+
     fn try_from(form: AssigneeSelectionForm) -> Result<Self, Self::Error> {
         form.validate().map_err(FormError::Validation)?;
+
         match (form.name, form.email) {
+            (None, None) => Ok(None),
             (Some(name), Some(email)) => Ok(Some(AssigneeSelectionPayload {
                 name: UserName::new(name).map_err(|_| FormError::InvalidAssigneeName)?,
                 email: UserEmail::new(email).map_err(|_| FormError::InvalidAssigneeEmail)?,
             })),
-            _ => Ok(None),
+            (Some(_), None) => Err(FormError::InvalidAssigneeEmail),
+            (None, Some(_)) => Err(FormError::InvalidAssigneeName),
         }
     }
 }
 
 impl ClientSelectionPayload {
-    /// Convert the selection into a new user payload.
-    pub fn into_domain(self, hub_id: HubId) -> Result<NewClient, TypeConstraintError> {
-        let name = ClientName::new(self.name)?;
-        let public_id = ClientPublicId::new(self.public_id)?;
-
-        Ok(NewClient::new(hub_id, name, public_id))
+    /// Convert the selection into a new client payload.
+    pub fn into_domain(self, hub_id: HubId) -> NewClient {
+        NewClient::new(hub_id, self.name, self.public_id)
     }
 }
 
 impl TryFrom<ClientSelectionForm> for Option<ClientSelectionPayload> {
     type Error = FormError;
+
     fn try_from(form: ClientSelectionForm) -> Result<Self, Self::Error> {
         form.validate().map_err(FormError::Validation)?;
+
         match (form.client_name, form.client_public_id) {
+            (None, None) => Ok(None),
             (Some(name), Some(public_id)) => Ok(Some(ClientSelectionPayload {
                 name: ClientName::new(name).map_err(|_| FormError::InvalidClientName)?,
                 public_id: ClientPublicId::new(public_id)
                     .map_err(|_| FormError::InvalidClientPublicId)?,
             })),
-            _ => Ok(None),
+            (Some(_), None) => Err(FormError::InvalidClientPublicId),
+            (None, Some(_)) => Err(FormError::InvalidClientName),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_task_payload_reports_invalid_status_with_field_mapping() {
+        let error = UpdateTaskPayload::try_from(UpdateTaskForm {
+            title: "Task".to_string(),
+            message: None,
+            due_date: None,
+            status: "invalid".to_string(),
+            track: None,
+            priority: "middle".to_string(),
+            assignee: AssigneeSelectionForm::default(),
+            client: ClientSelectionForm::default(),
+        })
+        .expect_err("status should be invalid");
+
+        assert_eq!(error.to_string(), "Выберите статус задачи.");
+        assert_eq!(error.field_errors()[0].field, "status");
+    }
+
+    #[test]
+    fn assignee_payload_requires_both_name_and_email() {
+        let error = Option::<AssigneeSelectionPayload>::try_from(AssigneeSelectionForm {
+            name: Some("Исполнитель".to_string()),
+            email: None,
+        })
+        .expect_err("email should be required when name is provided");
+
+        assert_eq!(error.to_string(), "Укажите корректный email исполнителя.");
+        assert_eq!(error.field_errors()[0].field, "email");
+    }
+
+    #[test]
+    fn task_comment_payload_uses_localized_comment_error() {
+        let error = TaskCommentPayload::try_from(TaskCommentForm {
+            message: "   ".to_string(),
+        })
+        .expect_err("blank comment should be rejected");
+
+        assert_eq!(error.to_string(), "Введите комментарий.");
+        assert_eq!(error.field_errors()[0].field, "message");
     }
 }

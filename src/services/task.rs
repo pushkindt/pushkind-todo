@@ -19,10 +19,7 @@ use crate::domain::{
     user::User,
 };
 use crate::dto::zmq::ZmqTask;
-use crate::forms::task::{
-    QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
-    UpdateTaskForm, UpdateTaskPayload,
-};
+use crate::forms::task::{QuickTaskStatusPayload, TaskCommentPayload, UpdateTaskPayload};
 use crate::repository::{
     ClientReader, ClientWriter, TaskEventReader, TaskEventWriter, TaskReader, TaskWriter,
     UserReader, UserWriter,
@@ -160,7 +157,7 @@ where
 /// Update a task with the values submitted from the edit form.
 pub fn update_task<R, ZE, ZT>(
     task_id: i32,
-    form: UpdateTaskForm,
+    submission: UpdateTaskPayload,
     user: &AuthenticatedUser,
     repo: &R,
     zmq_email_sender: &ZE,
@@ -180,10 +177,6 @@ where
     ZT: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
-
-    log::info!("Updating task {task_id} with form: {:?}", form);
-
-    let submission = UpdateTaskPayload::try_from(form)?;
 
     log::info!("Updating task {task_id} with payload: {:?}", submission);
 
@@ -207,7 +200,7 @@ where
 
     let assignee_user = match assignee {
         Some(assignee) => {
-            let new_user = assignee.into_domain(hub_id)?;
+            let new_user = assignee.into_domain(hub_id);
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -215,7 +208,7 @@ where
 
     let client = match client {
         Some(client) => {
-            let new_client = client.into_domain(hub_id)?;
+            let new_client = client.into_domain(hub_id);
             Some(repo.create_or_update_client(&new_client)?)
         }
         None => None,
@@ -501,7 +494,7 @@ where
 /// Transition the task status with a lightweight quick action from the UI.
 pub fn transition_task_status<R, ZE, ZT>(
     task_id: i32,
-    form: QuickTaskStatusForm,
+    payload: QuickTaskStatusPayload,
     user: &AuthenticatedUser,
     repo: &R,
     zmq_email_sender: &ZE,
@@ -520,8 +513,6 @@ where
     ZT: ZmqSenderExt,
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
-
-    let payload: QuickTaskStatusPayload = form.try_into()?;
 
     let hub_id = HubId::new(user.hub_id)?;
     let task_id = TaskId::new(task_id)?;
@@ -705,10 +696,10 @@ where
     }
 
     if let Some(comment_text) = payload.comment {
-        let form = TaskCommentForm {
-            message: comment_text.to_string(),
+        let payload = TaskCommentPayload {
+            message: comment_text,
         };
-        if let Err(err) = add_task_comment(task_id.get(), form, user, repo, zmq_email_sender) {
+        if let Err(err) = add_task_comment(task_id.get(), payload, user, repo, zmq_email_sender) {
             log::error!("Failed to attach quick status comment for task {task_id}: {err}");
         }
     }
@@ -962,7 +953,7 @@ fn build_task_updated_email(
 /// Record a new comment on the specified task from the current user.
 pub fn add_task_comment<R, Z>(
     task_id: i32,
-    form: TaskCommentForm,
+    payload: TaskCommentPayload,
     user: &AuthenticatedUser,
     repo: &R,
     zmq_sender: &Z,
@@ -976,7 +967,6 @@ where
     let hub_id = HubId::new(user.hub_id)?;
     let task_id = TaskId::new(task_id)?;
 
-    let payload = TaskCommentPayload::try_from(form)?;
     let task = repo
         .get_task_by_id(task_id, hub_id)?
         .ok_or(ServiceError::NotFound)?;
@@ -1158,13 +1148,96 @@ mod tests {
         },
         user::User,
     };
-    use crate::forms::task::TaskCommentForm;
+    use crate::forms::task::{
+        QuickTaskStatusForm, TaskCommentForm, TaskCommentPayload, UpdateTaskForm, UpdateTaskPayload,
+    };
     use crate::repository::mock::{
         MockClientReader, MockTaskEventReader, MockTaskReader, MockTaskWriter, MockUserReader,
     };
     use crate::repository::{TaskListQuery, UserListQuery};
     use crate::services::mock::MockZmqSender;
     use mockall::Sequence;
+
+    fn update_task<R, ZE, ZT>(
+        task_id: i32,
+        form: UpdateTaskForm,
+        user: &AuthenticatedUser,
+        repo: &R,
+        zmq_email_sender: &ZE,
+        zmq_task_sender: &ZT,
+    ) -> ServiceResult<Task>
+    where
+        R: TaskReader
+            + TaskWriter
+            + TaskEventReader
+            + TaskEventWriter
+            + UserReader
+            + UserWriter
+            + ClientReader
+            + ClientWriter
+            + ?Sized,
+        ZE: ZmqSenderExt,
+        ZT: ZmqSenderExt,
+    {
+        super::update_task(
+            task_id,
+            UpdateTaskPayload::try_from(form)?,
+            user,
+            repo,
+            zmq_email_sender,
+            zmq_task_sender,
+        )
+    }
+
+    fn transition_task_status<R, ZE, ZT>(
+        task_id: i32,
+        form: QuickTaskStatusForm,
+        user: &AuthenticatedUser,
+        repo: &R,
+        zmq_email_sender: &ZE,
+        zmq_task_sender: &ZT,
+    ) -> ServiceResult<Task>
+    where
+        R: TaskReader
+            + TaskWriter
+            + TaskEventReader
+            + TaskEventWriter
+            + UserReader
+            + UserWriter
+            + ClientReader
+            + ?Sized,
+        ZE: ZmqSenderExt,
+        ZT: ZmqSenderExt,
+    {
+        super::transition_task_status(
+            task_id,
+            QuickTaskStatusPayload::try_from(form)?,
+            user,
+            repo,
+            zmq_email_sender,
+            zmq_task_sender,
+        )
+    }
+
+    fn add_task_comment<R, Z>(
+        task_id: i32,
+        form: TaskCommentForm,
+        user: &AuthenticatedUser,
+        repo: &R,
+        zmq_sender: &Z,
+    ) -> ServiceResult<TaskEvent>
+    where
+        R: TaskReader + TaskEventReader + TaskEventWriter + UserReader + UserWriter + ?Sized,
+        Z: ZmqSenderExt,
+    {
+        super::add_task_comment(
+            task_id,
+            TaskCommentPayload::try_from(form)?,
+            user,
+            repo,
+            zmq_sender,
+        )
+    }
 
     #[derive(Default)]
     struct RecordingZmqSender {
@@ -2397,7 +2470,7 @@ mod tests {
     }
 
     #[test]
-    fn update_task_requires_email_for_assignee() {
+    fn update_task_rejects_partial_assignee_selection() {
         let task = sample_task(11, 1, None, 5);
         let repo = UpdateRepo::new(task, Vec::new());
         let zmq = MockZmqSender {};
@@ -2412,22 +2485,14 @@ mod tests {
         }))
         .expect("valid form payload");
 
-        let outcome =
-            update_task(11, form, &user, &repo, &zmq, &zmq).expect("expected update to succeed");
+        let outcome = update_task(11, form, &user, &repo, &zmq, &zmq);
 
-        assert_eq!(outcome.id, TaskId::new(11).unwrap());
-        assert_eq!(outcome.title.as_str(), "Updated");
-
-        {
-            let stored = repo.task.borrow();
-            assert_eq!(stored.title.as_str(), "Updated");
-            assert!(stored.assigned_to.is_none());
-        }
-
-        let events = repo.events.borrow();
-        assert_eq!(events.len(), 1);
-        let metadata_event = &events[0];
-        assert_eq!(metadata_event.event_type, TaskEventType::MetadataUpdated);
+        assert!(matches!(
+            outcome,
+            Err(ServiceError::Form(ref message))
+                if message == "Укажите корректный email исполнителя."
+        ));
+        assert!(repo.events.borrow().is_empty());
     }
 
     #[test]
@@ -2649,7 +2714,7 @@ mod tests {
         let zmq = MockZmqSender {};
 
         let form = QuickTaskStatusForm {
-            status: TaskStatus::InProgress,
+            status: "InProgress".to_string(),
             comment: None,
             assign_self: false,
         };
@@ -2666,7 +2731,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = QuickTaskStatusForm {
-            status: TaskStatus::InProgress,
+            status: "InProgress".to_string(),
             comment: None,
             assign_self: false,
         };
@@ -2688,7 +2753,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = QuickTaskStatusForm {
-            status: TaskStatus::InProgress,
+            status: "InProgress".to_string(),
             comment: None,
             assign_self: true,
         };
@@ -2716,7 +2781,7 @@ mod tests {
         let user = user_with_roles(&[SERVICE_ACCESS_ROLE]);
 
         let form = QuickTaskStatusForm {
-            status: TaskStatus::Completed,
+            status: "Completed".to_string(),
             comment: Some("Готово".to_string()),
             assign_self: false,
         };

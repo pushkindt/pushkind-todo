@@ -1,3 +1,5 @@
+//! Helpers for loading compiled frontend assets and opening built HTML documents.
+
 use std::path::Path;
 
 use actix_files::NamedFile;

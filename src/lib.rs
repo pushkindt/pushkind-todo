@@ -19,7 +19,7 @@ use pushkind_common::middleware::RedirectUnauthorized;
 #[cfg(feature = "server")]
 use pushkind_common::models::config::CommonServerConfig;
 #[cfg(feature = "server")]
-use pushkind_common::routes::{logout, not_assigned};
+use pushkind_common::routes::logout;
 #[cfg(feature = "server")]
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
 #[cfg(feature = "server")]
@@ -29,6 +29,13 @@ use tera::Tera;
 use crate::models::config::{ServerConfig, ZmqSenders};
 #[cfg(feature = "server")]
 use crate::repository::DieselRepository;
+#[cfg(feature = "server")]
+use crate::routes::api::{
+    api_v1_clients, api_v1_iam, api_v1_no_access, api_v1_task, api_v1_tasks, api_v1_tracks,
+    api_v1_users,
+};
+#[cfg(feature = "server")]
+use crate::routes::aux::not_assigned;
 #[cfg(feature = "server")]
 use crate::routes::main::{add_task, show_index, tasks_upload};
 #[cfg(feature = "server")]
@@ -102,8 +109,6 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
     let bind_address = (server_config.address.clone(), server_config.port);
 
     HttpServer::new(move || {
-        use crate::routes::api::api_v1_tasks;
-
         App::new()
             .wrap(message_framework.clone())
             .wrap(IdentityMiddleware::default())
@@ -117,7 +122,16 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .service(Files::new("/assets", "./assets"))
             .service(not_assigned)
-            .service(web::scope("/api").service(api_v1_tasks))
+            .service(
+                web::scope("/api")
+                    .service(api_v1_iam)
+                    .service(api_v1_no_access)
+                    .service(api_v1_tasks)
+                    .service(api_v1_task)
+                    .service(api_v1_users)
+                    .service(api_v1_clients)
+                    .service(api_v1_tracks),
+            )
             .service(
                 web::scope("")
                     .wrap(RedirectUnauthorized)

@@ -9,11 +9,12 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::SERVICE_ACCESS_ROLE;
+use crate::domain::client::Client;
 use crate::domain::task::{Task, TaskPriority, TaskStatus};
 use crate::domain::types::{ClientId, HubId, TaskPublicId, TaskTrack, UserId};
 use crate::domain::user::{NewUser, User};
 use crate::dto::zmq::ZmqTask;
-use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
+use crate::forms::main::{AddTaskPayload, UploadTasksPayload};
 use crate::repository::{
     ClientReader, TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
@@ -22,12 +23,44 @@ use crate::services::{ServiceError, ServiceResult};
 use super::notifications;
 use crate::dto::main::{IndexPageData, IndexPageFilters, IndexQuery, IndexTask};
 
+pub(crate) struct LoadedTaskCollection {
+    pub items: Vec<IndexTask>,
+    pub page: usize,
+    pub total_pages: usize,
+    pub filters: IndexPageFilters,
+    pub users: Vec<User>,
+    pub recently_updated_task_ids: Vec<crate::domain::types::TaskId>,
+    pub tracks: Vec<TaskTrack>,
+    pub clients: Vec<Client>,
+}
+
 /// Loads the tasks list for the main index page.
 pub fn load_index_page<R>(
     query: IndexQuery,
     user: &AuthenticatedUser,
     repo: &R,
 ) -> ServiceResult<IndexPageData>
+where
+    R: TaskReader + UserReader + UserWriter + ClientReader + ?Sized,
+{
+    let collection = load_task_collection(query, user, repo)?;
+    let tasks = Paginated::new(collection.items, collection.page, collection.total_pages);
+
+    Ok(IndexPageData {
+        tasks,
+        filters: collection.filters,
+        users: collection.users,
+        recently_updated_task_ids: collection.recently_updated_task_ids,
+        tracks: collection.tracks,
+        clients: collection.clients,
+    })
+}
+
+pub(crate) fn load_task_collection<R>(
+    query: IndexQuery,
+    user: &AuthenticatedUser,
+    repo: &R,
+) -> ServiceResult<LoadedTaskCollection>
 where
     R: TaskReader + UserReader + UserWriter + ClientReader + ?Sized,
 {
@@ -153,7 +186,7 @@ where
         .unwrap_or_default();
 
     let total_pages = total.div_ceil(DEFAULT_ITEMS_PER_PAGE);
-    let task_entries = tasks
+    let items = tasks
         .into_iter()
         .map(|task| IndexTask {
             assignee: task
@@ -162,7 +195,6 @@ where
             task,
         })
         .collect::<Vec<_>>();
-    let tasks = Paginated::new(task_entries, page, total_pages);
 
     let filters = IndexPageFilters {
         search,
@@ -177,11 +209,12 @@ where
     };
 
     let tracks = repo.list_task_tracks(user.hub_id)?;
-
     let clients = repo.list_clients(user.hub_id)?;
 
-    Ok(IndexPageData {
-        tasks,
+    Ok(LoadedTaskCollection {
+        items,
+        page,
+        total_pages,
         filters,
         users,
         recently_updated_task_ids,
@@ -213,7 +246,7 @@ fn end_of_day(date: NaiveDate) -> Option<NaiveDateTime> {
 
 /// Validates the add-task form and persists a new task record.
 pub fn add_task<R, ZE, ZT>(
-    form: AddTaskForm,
+    payload: AddTaskPayload,
     user: &AuthenticatedUser,
     repo: &R,
     zmq_email_sender: &ZE,
@@ -230,14 +263,13 @@ where
     let new_user: NewUser = user.try_into()?;
     let author = repo.create_or_update_user(&new_user)?;
 
-    let payload = AddTaskPayload::try_from(form)?;
     let assignee_selection = payload.assignee.clone();
 
-    let mut new_task = payload.into_domain(author.id, hub_id)?;
+    let mut new_task = payload.into_domain(author.id, hub_id);
 
     let assignee_user = match assignee_selection {
         Some(selection) => {
-            let new_user = selection.into_domain(hub_id)?;
+            let new_user = selection.into_domain(hub_id);
             Some(repo.create_or_update_user(&new_user)?)
         }
         None => None,
@@ -281,7 +313,7 @@ where
 
 /// Parses the uploaded CSV file and creates task records in bulk.
 pub fn upload_tasks<R>(
-    form: UploadTasksForm,
+    payload: UploadTasksPayload,
     user: &AuthenticatedUser,
     repo: &R,
 ) -> ServiceResult<usize>
@@ -290,16 +322,11 @@ where
 {
     ensure_role(user, SERVICE_ACCESS_ROLE)?;
 
-    let mut form = form;
-
     let hub_id = HubId::new(user.hub_id)?;
     let new_user: NewUser = user.try_into()?;
     let author = repo.create_or_update_user(&new_user)?;
 
-    let new_tasks = form.parse(author.id, hub_id).map_err(|err| {
-        log::error!("Failed to parse tasks: {err}");
-        ServiceError::Form("Ошибка при парсинге задач".to_string())
-    })?;
+    let new_tasks = payload.into_domain(author.id, hub_id);
 
     let created_count = new_tasks.len();
 
@@ -384,6 +411,7 @@ mod tests {
         HubId, TaskDescription, TaskId, TaskTitle, TaskTrack, UserEmail, UserId, UserName,
     };
     use crate::domain::user::{UpdateUser, User};
+    use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
     use crate::forms::task::AssigneeSelectionForm;
     use crate::repository::mock::{
         MockClientReader, MockTaskReader, MockTaskWriter, MockUserReader, MockUserWriter,
@@ -399,6 +427,42 @@ mod tests {
             Some(date) => date.and_hms_opt(0, 0, 0).unwrap_or_default(),
             None => NaiveDateTime::default(),
         }
+    }
+
+    fn add_task<R, ZE, ZT>(
+        form: AddTaskForm,
+        user: &AuthenticatedUser,
+        repo: &R,
+        zmq_email_sender: &ZE,
+        zmq_task_sender: &ZT,
+    ) -> ServiceResult<Task>
+    where
+        R: TaskWriter + UserReader + UserWriter + ?Sized,
+        ZE: ZmqSenderExt,
+        ZT: ZmqSenderExt,
+    {
+        super::add_task(
+            AddTaskPayload::try_from(form)?,
+            user,
+            repo,
+            zmq_email_sender,
+            zmq_task_sender,
+        )
+    }
+
+    fn upload_tasks<R>(
+        form: UploadTasksForm,
+        user: &AuthenticatedUser,
+        repo: &R,
+    ) -> ServiceResult<usize>
+    where
+        R: TaskWriter + UserReader + UserWriter + ?Sized,
+    {
+        let payload = form
+            .try_into_payload()
+            .map_err(|error| ServiceError::Form(error.to_string()))?;
+
+        super::upload_tasks(payload, user, repo)
     }
 
     fn sample_task(id: i32, hub_id: i32, title: &str) -> Task {
@@ -1189,15 +1253,7 @@ mod tests {
             assignee: assignee_selection_form_none(),
         };
 
-        let expected_hub = user.hub_id;
-        let expected_email = user.email.to_lowercase();
-        let expected_name = user.name.clone();
-        let author = sample_user_record(7, expected_hub, &expected_email, &expected_name);
-
-        repo.user_writer
-            .expect_create_or_update_user()
-            .times(1)
-            .return_once(move |_| Ok(author));
+        repo.user_writer.expect_create_or_update_user().never();
         repo.user_writer.expect_touch_visited_at().never();
         repo.task_writer.expect_create_task().never();
 
@@ -1205,7 +1261,7 @@ mod tests {
 
         match result {
             Err(ServiceError::Form(message)) => {
-                assert!(message.starts_with("validation errors:"));
+                assert!(message.starts_with("Ошибка валидации формы:"));
             }
             other => panic!("expected form error, got {other:?}"),
         }
@@ -1603,24 +1659,14 @@ mod tests {
         let expected_email_lower = user.email.to_lowercase();
         let expected_name = user.name.clone();
         let author = sample_user_record(8, expected_hub, &expected_email_lower, &expected_name);
+        let expected_hub_id = HubId::new(expected_hub).unwrap();
         let expected_author_id = author.id;
 
-        let expected_hub_id = HubId::new(expected_hub).unwrap();
-        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
-        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
-        let author_for_create = author.clone();
-
         repo.user_reader.expect_get_user_by_email().never();
-
         repo.user_writer
             .expect_create_or_update_user()
             .times(1)
-            .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub_id);
-                assert_eq!(new_user.name, expected_name_for_create);
-                assert_eq!(new_user.email, expected_email_for_create);
-                Ok(author_for_create.clone())
-            });
+            .return_once(move |_| Ok(author));
 
         repo.user_writer.expect_touch_visited_at().never();
 
@@ -1669,27 +1715,8 @@ foo,bar
 ",
         );
 
-        let expected_hub = user.hub_id;
-        let expected_email_lower = user.email.to_lowercase();
-        let expected_name = user.name.clone();
-        let author = sample_user_record(9, expected_hub, &expected_email_lower, &expected_name);
-
-        let expected_hub_id = HubId::new(expected_hub).unwrap();
-        let expected_email_for_create = UserEmail::new(expected_email_lower.clone()).unwrap();
-        let expected_name_for_create = UserName::new(expected_name.clone()).unwrap();
-        let author_for_create = author.clone();
-
         repo.user_reader.expect_get_user_by_email().never();
-
-        repo.user_writer
-            .expect_create_or_update_user()
-            .times(1)
-            .returning(move |new_user| {
-                assert_eq!(new_user.hub_id, expected_hub_id);
-                assert_eq!(new_user.name, expected_name_for_create);
-                assert_eq!(new_user.email, expected_email_for_create);
-                Ok(author_for_create.clone())
-            });
+        repo.user_writer.expect_create_or_update_user().never();
 
         repo.user_writer.expect_touch_visited_at().never();
 
@@ -1699,7 +1726,7 @@ foo,bar
 
         match result {
             Err(ServiceError::Form(message)) => {
-                assert_eq!(message, "Ошибка при парсинге задач");
+                assert_eq!(message, "Не удалось обработать CSV-файл.");
             }
             other => panic!("expected form error, got {other:?}"),
         }

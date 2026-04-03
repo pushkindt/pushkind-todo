@@ -8,7 +8,7 @@ use pushkind_common::routes::{base_context, redirect, render_template};
 use tera::Tera;
 
 use crate::dto::main::IndexQuery;
-use crate::forms::main::{AddTaskForm, UploadTasksForm};
+use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, main as main_service};
@@ -60,8 +60,16 @@ pub async fn add_task(
     web::Form(form): web::Form<AddTaskForm>,
 ) -> impl Responder {
     let zmq_senders = zmq_senders.get_ref();
+    let payload = match AddTaskPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => {
+            FlashMessage::error(err.to_string()).send();
+            return redirect("/");
+        }
+    };
+
     match main_service::add_task(
-        form,
+        payload,
         &user,
         repo.get_ref(),
         &zmq_senders.emailer,
@@ -94,7 +102,15 @@ pub async fn tasks_upload(
     repo: web::Data<DieselRepository>,
     MultipartForm(form): MultipartForm<UploadTasksForm>,
 ) -> impl Responder {
-    match main_service::upload_tasks(form, &user, repo.get_ref()) {
+    let payload = match form.try_into_payload() {
+        Ok(payload) => payload,
+        Err(err) => {
+            FlashMessage::error(err.to_string()).send();
+            return redirect("/");
+        }
+    };
+
+    match main_service::upload_tasks(payload, &user, repo.get_ref()) {
         Ok(created_count) => {
             FlashMessage::success(format!("Добавлено задач: {created_count}")).send();
             redirect("/")

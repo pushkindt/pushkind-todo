@@ -103,11 +103,10 @@ by swapping in the `mockall`-based fakes from `src/repository/mock.rs`.
 - `diesel-cli` with SQLite support (`cargo install diesel_cli --no-default-features --features sqlite`)
 - SQLite 3 installed on your system
 
-### Frontend Toolchain (Phase 1)
+### Frontend Toolchain (Phase 2)
 
-Phase 1 of the React migration adds a frontend workspace under `frontend/`.
-The application runtime still serves the current Tera UI in this phase, so
-`cargo run` does **not** require a prior frontend build yet.
+The React migration now includes a local no-access page served from the
+frontend build.
 
 Install frontend dependencies with:
 
@@ -126,12 +125,14 @@ npm run build
 The frontend build writes compiled HTML, JavaScript, CSS, and
 `manifest.json` into `assets/dist/`.
 
-Phase 1 note:
+Phase 2 note:
 
-- built frontend assets are required for frontend verification commands
-- built frontend assets are not yet used by `GET /`, `GET /task/{task_id}`, or
-  `/na`
-- those routes continue to use the current Tera templates until later phases
+- built frontend assets are required for `/na` and frontend verification
+  commands
+- `GET /` and `GET /task/{task_id}` still use the current Tera templates
+- if `assets/dist/app/no-access.html` is missing, `/na` returns
+  `503 Service Unavailable` until you run `cd frontend && npm run build`
+- later phases will move the main task pages to built frontend documents too
 
 ### Configuration
 

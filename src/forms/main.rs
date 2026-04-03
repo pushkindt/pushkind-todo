@@ -5,13 +5,12 @@ use actix_multipart::form::{MultipartForm, tempfile::TempFile};
 use csv::Trim;
 use pushkind_common::routes::empty_string_as_none;
 use serde::Deserialize;
-use thiserror::Error;
 use validator::Validate;
 
 use crate::{
     domain::{
         task::{NewTask, TaskPriority},
-        types::{HubId, TaskDescription, TaskTitle, TaskTrack, TypeConstraintError, UserId},
+        types::{HubId, TaskDescription, TaskTitle, TaskTrack, UserId},
     },
     forms::{
         FormError,
@@ -21,13 +20,15 @@ use crate::{
 
 #[derive(Deserialize, Validate)]
 pub struct AddTaskForm {
-    #[validate(length(min = 1))]
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Укажите название задачи."))]
     pub title: String,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub message: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub track: Option<String>,
-    #[validate(length(min = 1))]
+    #[serde(default)]
+    #[validate(length(min = 1, message = "Выберите приоритет задачи."))]
     pub priority: String,
     /// Assignee data captured by the modal.
     #[serde(flatten, default)]
@@ -82,11 +83,7 @@ impl TryFrom<AddTaskForm> for AddTaskPayload {
 
 impl AddTaskPayload {
     /// Convert the payload into a [`NewTask`] for the given hub and author.
-    pub fn into_domain(
-        self,
-        author_id: UserId,
-        hub_id: HubId,
-    ) -> Result<NewTask, TypeConstraintError> {
+    pub fn into_domain(self, author_id: UserId, hub_id: HubId) -> NewTask {
         let mut new_task = NewTask::new(hub_id, author_id, self.title);
         new_task = new_task.priority(self.priority);
 
@@ -98,7 +95,36 @@ impl AddTaskPayload {
             new_task = new_task.track(track);
         }
 
-        Ok(new_task)
+        new_task
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// A normalized task row parsed from the uploaded CSV file.
+pub struct UploadTaskRowPayload {
+    pub title: TaskTitle,
+    pub description: Option<TaskDescription>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Parsed CSV payload detached from the multipart transport details.
+pub struct UploadTasksPayload {
+    pub tasks: Vec<UploadTaskRowPayload>,
+}
+
+impl UploadTasksPayload {
+    /// Convert the normalized rows into domain tasks for the current author.
+    pub fn into_domain(self, author_id: UserId, hub_id: HubId) -> Vec<NewTask> {
+        self.tasks
+            .into_iter()
+            .map(|task| {
+                let mut new_task = NewTask::new(hub_id, author_id, task.title);
+                if let Some(description) = task.description {
+                    new_task = new_task.description(description);
+                }
+                new_task
+            })
+            .collect()
     }
 }
 
@@ -110,44 +136,11 @@ pub struct UploadTasksForm {
     pub csv: TempFile,
 }
 
-#[derive(Debug, Error)]
-/// Errors that can occur while parsing an uploaded tasks CSV file.
-pub enum UploadTasksFormError {
-    #[error("Error reading csv file")]
-    FileReadError,
-    #[error("Error parsing csv file")]
-    CsvParseError,
-    #[error("Invalid task data: {0}")]
-    InvalidTaskData(String),
-}
-
-impl From<std::io::Error> for UploadTasksFormError {
-    fn from(_: std::io::Error) -> Self {
-        UploadTasksFormError::FileReadError
-    }
-}
-
-impl From<csv::Error> for UploadTasksFormError {
-    fn from(_: csv::Error) -> Self {
-        UploadTasksFormError::CsvParseError
-    }
-}
-
-impl From<TypeConstraintError> for UploadTasksFormError {
-    fn from(err: TypeConstraintError) -> Self {
-        UploadTasksFormError::InvalidTaskData(err.to_string())
-    }
-}
-
 impl UploadTasksForm {
-    /// Parse the uploaded CSV file into a list of [`NewTask`] records.
-    pub fn parse(
-        &mut self,
-        author_id: UserId,
-        hub_id: HubId,
-    ) -> Result<Vec<NewTask>, UploadTasksFormError> {
-        self.csv.file.rewind()?;
-        parse_tasks(author_id, hub_id, self.csv.file.by_ref())
+    /// Parse the uploaded CSV file into a normalized payload.
+    pub fn try_into_payload(mut self) -> Result<UploadTasksPayload, FormError> {
+        self.csv.file.rewind().map_err(|_| FormError::InvalidCsv)?;
+        parse_tasks(self.csv.file.by_ref()).map_err(|_| FormError::InvalidCsv)
     }
 }
 
@@ -159,11 +152,7 @@ struct TaskCsvRow {
     description: Option<String>,
 }
 
-fn parse_tasks<R: Read>(
-    author_id: UserId,
-    hub_id: HubId,
-    reader: R,
-) -> Result<Vec<NewTask>, UploadTasksFormError> {
+fn parse_tasks<R: Read>(reader: R) -> Result<UploadTasksPayload, FormError> {
     let mut csv_reader = csv::ReaderBuilder::new()
         .trim(Trim::All)
         .from_reader(reader);
@@ -171,23 +160,23 @@ fn parse_tasks<R: Read>(
     let mut tasks = Vec::new();
 
     for row in csv_reader.deserialize::<TaskCsvRow>() {
-        let TaskCsvRow { title, description } = row?;
+        let TaskCsvRow { title, description } = row.map_err(|_| FormError::InvalidCsv)?;
         let title = title.trim();
 
         if title.is_empty() {
             continue;
         }
 
-        let mut task = NewTask::try_new(hub_id.get(), author_id.get(), title)?;
-
-        if let Some(description) = description {
-            task = task.description(TaskDescription::new(description)?);
-        }
-
-        tasks.push(task);
+        tasks.push(UploadTaskRowPayload {
+            title: TaskTitle::new(title).map_err(|_| FormError::InvalidCsv)?,
+            description: description
+                .map(TaskDescription::new)
+                .transpose()
+                .map_err(|_| FormError::InvalidCsv)?,
+        });
     }
 
-    Ok(tasks)
+    Ok(UploadTasksPayload { tasks })
 }
 
 #[cfg(test)]
@@ -197,25 +186,36 @@ mod tests {
 
     #[test]
     fn parse_tasks_skips_rows_without_titles() {
-        let author_id = UserId::new(1).unwrap();
-        let hub_id = HubId::new(1).unwrap();
         let csv = "title,description\nalpha,\n,\nbeta,\n";
 
-        let tasks = parse_tasks(author_id, hub_id, Cursor::new(csv)).expect("parse should succeed");
+        let payload = parse_tasks(Cursor::new(csv)).expect("parse should succeed");
 
-        assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].title.as_str(), "alpha");
-        assert_eq!(tasks[1].title.as_str(), "beta");
+        assert_eq!(payload.tasks.len(), 2);
+        assert_eq!(payload.tasks[0].title.as_str(), "alpha");
+        assert_eq!(payload.tasks[1].title.as_str(), "beta");
     }
 
     #[test]
     fn parse_tasks_allows_missing_title_header() {
-        let author_id = UserId::new(1).unwrap();
-        let hub_id = HubId::new(1).unwrap();
         let csv = "description\nsomething\n";
 
-        let tasks = parse_tasks(author_id, hub_id, Cursor::new(csv)).expect("parse should succeed");
+        let payload = parse_tasks(Cursor::new(csv)).expect("parse should succeed");
 
-        assert!(tasks.is_empty());
+        assert!(payload.tasks.is_empty());
+    }
+
+    #[test]
+    fn add_task_payload_uses_localized_priority_error() {
+        let error = AddTaskPayload::try_from(AddTaskForm {
+            title: "Task".to_string(),
+            message: None,
+            track: None,
+            priority: "urgent".to_string(),
+            assignee: AssigneeSelectionForm::default(),
+        })
+        .expect_err("priority should be invalid");
+
+        assert_eq!(error.to_string(), "Выберите приоритет задачи.");
+        assert_eq!(error.field_errors()[0].field, "priority");
     }
 }

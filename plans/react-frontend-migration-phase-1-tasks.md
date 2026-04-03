@@ -6,14 +6,15 @@ This task file covers only Phase 1 from
 
 - create the React + TypeScript + Vite frontend workspace
 - emit build output into `assets/dist/`
-- add a backend helper for loading the Vite manifest and opening built HTML
+- add a backend helper for opening built HTML documents
 - add the required ADR because this work changes frontend runtime architecture
 - document how to install dependencies and build frontend assets
 - keep the live application on the current Tera runtime path
 
 Do not start Phase 2 in this file. Phase 1 is complete only when the
-repository can build frontend assets, Rust can understand those built assets,
-and the live routes still render through the current Tera templates.
+repository can build frontend assets, Rust can open the built HTML documents
+needed for later route cutover, and the live routes still render through the
+current Tera templates.
 
 ## References
 - Service baseline:
@@ -54,8 +55,7 @@ belongs to later phases.
 - `assets/dist/` is the configured production build output directory.
 - `assets/dist/manifest.json` is produced by `npm run build`.
 - `src/frontend.rs` can:
-  load a Vite manifest,
-  resolve a named manifest entry,
+  define the built document paths for later phases,
   open a built HTML file.
 - `README.md` explains how to install frontend dependencies and build assets.
 - The application still renders the current Tera UI at runtime.
@@ -668,18 +668,13 @@ Create [../src/frontend.rs](../src/frontend.rs) with exactly this content:
 ```rust
 //! Helpers for loading compiled frontend assets and opening built HTML documents.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use actix_files::NamedFile;
-use serde::Deserialize;
 use thiserror::Error;
 
 /// Root directory for built frontend artifacts emitted by Vite.
 pub const FRONTEND_DIST_DIR: &str = "assets/dist";
-
-/// Relative path of the Vite manifest inside [`FRONTEND_DIST_DIR`].
-pub const FRONTEND_MANIFEST_PATH: &str = "manifest.json";
 
 /// Built HTML document that will eventually back `GET /`.
 pub const FRONTEND_INDEX_DOCUMENT: &str = "app/index.html";
@@ -690,60 +685,11 @@ pub const FRONTEND_TASK_DOCUMENT: &str = "app/task.html";
 /// Built HTML document that will eventually back `GET /na`.
 pub const FRONTEND_NO_ACCESS_DOCUMENT: &str = "app/no-access.html";
 
-/// Parsed subset of the Vite manifest entry fields this service needs.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct FrontendManifestEntry {
-    pub file: String,
-    #[serde(default)]
-    pub css: Vec<String>,
-    #[serde(default)]
-    pub imports: Vec<String>,
-    #[serde(rename = "isEntry", default)]
-    pub is_entry: bool,
-    #[serde(default)]
-    pub src: Option<String>,
-}
-
-/// Parsed Vite manifest keyed by the original entry name.
-pub type FrontendManifest = BTreeMap<String, FrontendManifestEntry>;
-
-/// Errors raised while reading, parsing, or resolving frontend assets.
+/// Errors raised while reading frontend assets.
 #[derive(Debug, Error)]
 pub enum FrontendAssetError {
     #[error("failed to read frontend asset: {0}")]
     Read(#[from] std::io::Error),
-    #[error("failed to parse frontend manifest: {0}")]
-    Parse(#[from] serde_json::Error),
-    #[error("frontend manifest entry not found: {0}")]
-    MissingEntry(String),
-}
-
-/// Build an absolute-on-repo path under [`FRONTEND_DIST_DIR`].
-pub fn frontend_dist_path(relative_path: impl AsRef<Path>) -> PathBuf {
-    Path::new(FRONTEND_DIST_DIR).join(relative_path)
-}
-
-/// Load and parse a Vite manifest from the provided path.
-pub fn load_frontend_manifest_from_path(
-    path: impl AsRef<Path>,
-) -> Result<FrontendManifest, FrontendAssetError> {
-    let manifest_json = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&manifest_json)?)
-}
-
-/// Load and parse the default Vite manifest emitted by this service.
-pub fn load_default_frontend_manifest() -> Result<FrontendManifest, FrontendAssetError> {
-    load_frontend_manifest_from_path(frontend_dist_path(FRONTEND_MANIFEST_PATH))
-}
-
-/// Resolve a named manifest entry from a parsed Vite manifest.
-pub fn resolve_manifest_entry<'a>(
-    manifest: &'a FrontendManifest,
-    entry_name: &str,
-) -> Result<&'a FrontendManifestEntry, FrontendAssetError> {
-    manifest
-        .get(entry_name)
-        .ok_or_else(|| FrontendAssetError::MissingEntry(entry_name.to_string()))
 }
 
 /// Open a Vite-built HTML document for a React-owned route.
@@ -756,56 +702,6 @@ pub async fn open_frontend_html(path: impl AsRef<Path>) -> Result<NamedFile, Fro
 mod tests {
     use super::*;
     use tempfile::tempdir;
-
-    #[test]
-    fn frontend_dist_path_joins_relative_path() {
-        let path = frontend_dist_path("app/index.html");
-        assert_eq!(path, Path::new("assets/dist").join("app/index.html"));
-    }
-
-    #[test]
-    fn loads_manifest_from_disk() {
-        let dir = tempdir().expect("tempdir should be created");
-        let manifest_path = dir.path().join("manifest.json");
-
-        std::fs::write(
-            &manifest_path,
-            r#"{
-  "app/index.html": {
-    "file": "entries/app/index-abc123.js",
-    "css": ["styles/app/index-abc123.css"],
-    "imports": ["chunks/shared-def456.js"],
-    "isEntry": true,
-    "src": "app/index.html"
-  }
-}"#,
-        )
-        .expect("manifest should be written");
-
-        let manifest = load_frontend_manifest_from_path(&manifest_path)
-            .expect("manifest should parse successfully");
-        let entry = resolve_manifest_entry(&manifest, "app/index.html")
-            .expect("entry should exist");
-
-        assert_eq!(entry.file, "entries/app/index-abc123.js");
-        assert_eq!(entry.css, vec!["styles/app/index-abc123.css".to_string()]);
-        assert_eq!(entry.imports, vec!["chunks/shared-def456.js".to_string()]);
-        assert!(entry.is_entry);
-        assert_eq!(entry.src.as_deref(), Some("app/index.html"));
-    }
-
-    #[test]
-    fn missing_manifest_entry_returns_error() {
-        let manifest = FrontendManifest::new();
-
-        let error = resolve_manifest_entry(&manifest, "app/index.html")
-            .expect_err("missing entry should return an error");
-
-        assert!(matches!(
-            error,
-            FrontendAssetError::MissingEntry(ref name) if name == "app/index.html"
-        ));
-    }
 
     #[test]
     fn can_open_existing_file() {
@@ -974,7 +870,7 @@ Phase 2 by accident.
 Run:
 
 ```bash
-rg -n "open_frontend_html|load_default_frontend_manifest|resolve_manifest_entry|FRONTEND_INDEX_DOCUMENT|FRONTEND_TASK_DOCUMENT|FRONTEND_NO_ACCESS_DOCUMENT" src
+rg -n "open_frontend_html|FRONTEND_DIST_DIR|FRONTEND_INDEX_DOCUMENT|FRONTEND_TASK_DOCUMENT|FRONTEND_NO_ACCESS_DOCUMENT" src
 ```
 
 Expected result:
@@ -1087,7 +983,7 @@ Mark Phase 1 done only if all of the following are true:
 - `frontend/package-lock.json` is committed
 - `npm run build` emits assets into `assets/dist/`
 - `assets/dist/manifest.json` is produced by the build
-- Rust can parse a Vite manifest and resolve an entry from it
+- `src/frontend.rs` exposes the built document paths needed by later phases
 - Rust can open a built HTML file with the helper in `src/frontend.rs`
 - `.gitignore` excludes `frontend/node_modules/` and `assets/dist/`
 - `README.md` explains the new frontend toolchain

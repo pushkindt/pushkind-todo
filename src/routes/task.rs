@@ -6,7 +6,10 @@ use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{base_context, redirect, render_template};
 use tera::{Context, Tera};
 
-use crate::forms::task::{QuickTaskStatusForm, TaskCommentForm, UpdateTaskForm};
+use crate::forms::task::{
+    QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
+    UpdateTaskForm, UpdateTaskPayload,
+};
 use crate::models::config::ServerConfig;
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
@@ -95,9 +98,17 @@ pub async fn update_task(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_senders = zmq_senders.get_ref();
+    let payload = match UpdateTaskPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => {
+            FlashMessage::error(err.to_string()).send();
+            return redirect(&format!("/task/{task_id}"));
+        }
+    };
+
     match task_service::update_task(
         task_id,
-        form,
+        payload,
         &user,
         repo.get_ref(),
         &zmq_senders.emailer,
@@ -139,10 +150,17 @@ pub async fn quick_update_task_status(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_senders = zmq_senders.get_ref();
+    let payload = match QuickTaskStatusPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => {
+            FlashMessage::error(err.to_string()).send();
+            return redirect(&format!("/task/{task_id}"));
+        }
+    };
 
     match task_service::transition_task_status(
         task_id,
-        form,
+        payload,
         &user,
         repo.get_ref(),
         &zmq_senders.emailer,
@@ -183,9 +201,21 @@ pub async fn add_task_comment(
 ) -> impl Responder {
     let task_id = task_id.into_inner();
     let zmq_senders = zmq_senders.get_ref();
+    let payload = match TaskCommentPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => {
+            FlashMessage::error(err.to_string()).send();
+            return redirect(&format!("/task/{task_id}"));
+        }
+    };
 
-    match task_service::add_task_comment(task_id, form, &user, repo.get_ref(), &zmq_senders.emailer)
-    {
+    match task_service::add_task_comment(
+        task_id,
+        payload,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+    ) {
         Ok(_) => {
             FlashMessage::success("Комментарий добавлен.").send();
             redirect(&format!("/task/{}", task_id))
