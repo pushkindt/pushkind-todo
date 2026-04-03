@@ -4,20 +4,24 @@ use pushkind_common::domain::auth::AuthenticatedUser;
 use serde_json::json;
 
 use pushkind_todo::domain::client::NewClient;
-use pushkind_todo::domain::task::{NewTask, TaskStatus};
+use pushkind_todo::domain::task::{NewTask, TaskPriority, TaskStatus};
 use pushkind_todo::domain::task_event::{NewTaskEvent, TaskEventType};
 use pushkind_todo::domain::types::{
-    ClientName, ClientPublicId, HubId, TaskDescription, TaskTitle, TaskTrack, UserEmail, UserName,
+    ClientName, ClientPublicId, HubId, TaskComment, TaskDescription, TaskTitle, TaskTrack,
+    UserEmail, UserName,
 };
 use pushkind_todo::domain::user::NewUser;
 use pushkind_todo::dto::api::{ClientLookupQueryDto, LookupQueryDto};
 use pushkind_todo::dto::main::IndexQuery;
+use pushkind_todo::forms::task::{QuickTaskStatusPayload, TaskCommentPayload, UpdateTaskPayload};
 use pushkind_todo::repository::{
-    ClientWriter, DieselRepository, TaskEventWriter, TaskWriter, UserWriter,
+    ClientWriter, DieselRepository, TaskEventWriter, TaskReader, TaskWriter, UserWriter,
 };
 use pushkind_todo::services::api::{
     get_task_collection_data, get_task_details_data, list_clients, list_tracks, list_users,
 };
+use pushkind_todo::services::mock::MockZmqSender;
+use pushkind_todo::services::{ServiceError, task as task_service};
 
 mod common;
 
@@ -238,4 +242,138 @@ fn lookup_contracts_filter_by_query() {
     assert_eq!(client_lookup.items[0].public_id, "ac-1");
     assert_eq!(track_lookup.items.len(), 1);
     assert_eq!(track_lookup.items[0].value, "Support");
+}
+
+#[test]
+fn task_details_contract_reflects_update_status_and_comment_mutations() {
+    let test_db = common::TestDb::new();
+    let repo = DieselRepository::new(test_db.pool());
+    let hub_id = HubId::new(1).unwrap();
+    let user = authenticated_user(&["todo"]);
+    let zmq = MockZmqSender;
+
+    let author = repo
+        .create_or_update_user(&NewUser::new(
+            hub_id,
+            UserName::new("Author").unwrap(),
+            UserEmail::new("author@example.com").unwrap(),
+        ))
+        .expect("create author");
+
+    let task = repo
+        .create_task(&NewTask::new(
+            hub_id,
+            author.id,
+            TaskTitle::new("Original Task").unwrap(),
+        ))
+        .expect("create task");
+
+    task_service::update_task(
+        task.id.get(),
+        UpdateTaskPayload {
+            title: TaskTitle::new("Updated Task").unwrap(),
+            description: Some(TaskDescription::new("<p>Updated body</p>").unwrap()),
+            track: Some(TaskTrack::new("Escalation").unwrap()),
+            priority: TaskPriority::High,
+            status: TaskStatus::InProgress,
+            due_date: Some(NaiveDate::from_ymd_opt(2024, 3, 12).unwrap()),
+            assignee: None,
+            client: None,
+        },
+        &user,
+        &repo,
+        &zmq,
+        &zmq,
+    )
+    .expect("update task");
+
+    task_service::transition_task_status(
+        task.id.get(),
+        QuickTaskStatusPayload {
+            status: TaskStatus::Completed,
+            comment: Some(TaskComment::new("<p>Готово</p>").unwrap()),
+            assign_self: false,
+        },
+        &user,
+        &repo,
+        &zmq,
+        &zmq,
+    )
+    .expect("complete task");
+
+    task_service::add_task_comment(
+        task.id.get(),
+        TaskCommentPayload {
+            message: TaskComment::new("<p>Новый комментарий</p>").unwrap(),
+        },
+        &user,
+        &repo,
+        &zmq,
+    )
+    .expect("add comment");
+
+    let dto = get_task_details_data(task.id.get(), &user, &repo).expect("task details");
+    let payload = serde_json::to_value(dto).expect("serialize details dto");
+
+    assert_eq!(payload["task"]["title"], json!("Updated Task"));
+    assert_eq!(payload["task"]["status"], json!("Completed"));
+    assert_eq!(payload["task"]["track"], json!("Escalation"));
+    assert_eq!(payload["task"]["priority"], json!("High"));
+    assert_eq!(payload["task"]["due_date"], json!("2024-03-12"));
+    assert!(
+        payload["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .any(|event| event["event_type"] == json!("MetadataUpdated"))
+    );
+    assert!(
+        payload["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .any(|event| event["event_type"] == json!("StatusChanged"))
+    );
+    assert!(
+        payload["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .any(|event| event["event_type"] == json!("Comment"))
+    );
+}
+
+#[test]
+fn deleted_task_disappears_from_task_details_contract() {
+    let test_db = common::TestDb::new();
+    let repo = DieselRepository::new(test_db.pool());
+    let hub_id = HubId::new(1).unwrap();
+
+    let author = repo
+        .create_or_update_user(&NewUser::new(
+            hub_id,
+            UserName::new("Author").unwrap(),
+            UserEmail::new("author@example.com").unwrap(),
+        ))
+        .expect("create author");
+
+    let task = repo
+        .create_task(&NewTask::new(
+            hub_id,
+            author.id,
+            TaskTitle::new("Disposable Task").unwrap(),
+        ))
+        .expect("create task");
+
+    task_service::delete_task(task.id.get(), &authenticated_user(&["todo"]), &repo)
+        .expect("delete task");
+
+    assert!(
+        repo.get_task_by_id(task.id, hub_id)
+            .expect("query task")
+            .is_none()
+    );
+
+    let result = get_task_details_data(task.id.get(), &authenticated_user(&["todo"]), &repo);
+    assert!(matches!(result, Err(ServiceError::NotFound)));
 }

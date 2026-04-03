@@ -8,10 +8,16 @@ use pushkind_common::models::config::CommonServerConfig;
 use crate::dto::api::{ClientLookupQueryDto, LookupQueryDto};
 use crate::dto::main::IndexQuery;
 use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
+use crate::forms::task::{
+    QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
+    UpdateTaskForm, UpdateTaskPayload,
+};
+use crate::models::config::ServerConfig;
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::routes::{form_error_response, mutation_error_response, mutation_success_response};
 use crate::services::main as main_service;
+use crate::services::task as task_service;
 use crate::services::{ServiceError, api as api_service};
 
 #[get("/v1/iam")]
@@ -64,9 +70,19 @@ pub async fn api_v1_task(
     task_id: web::Path<i32>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
+    server_config: web::Data<ServerConfig>,
 ) -> impl Responder {
     match api_service::get_task_details_data(task_id.into_inner(), &user, repo.get_ref()) {
-        Ok(response) => HttpResponse::Ok().json(response),
+        Ok(mut response) => {
+            if let Some(client) = response.client.as_mut() {
+                client.url = Some(format!(
+                    "{}/?public_id={}",
+                    server_config.crm_service_url, client.public_id
+                ));
+            }
+
+            HttpResponse::Ok().json(response)
+        }
         Err(ServiceError::Unauthorized) => HttpResponse::Unauthorized().finish(),
         Err(ServiceError::NotFound) => HttpResponse::NotFound().finish(),
         Err(err) => {
@@ -184,6 +200,139 @@ pub async fn api_v1_upload_tasks(
         | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
         Err(err) => {
             log::error!("Failed to upload tasks from API: {err}");
+            mutation_error_response(&err)
+        }
+    }
+}
+
+#[post("/v1/tasks/{task_id}/update")]
+/// Update a task from the React-owned task details page.
+pub async fn api_v1_update_task(
+    task_id: web::Path<i32>,
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    zmq_senders: web::Data<ZmqSenders>,
+    web::Form(form): web::Form<UpdateTaskForm>,
+) -> impl Responder {
+    let task_id = task_id.into_inner();
+    let payload = match UpdateTaskPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => return form_error_response(&err),
+    };
+
+    let zmq_senders = zmq_senders.get_ref();
+    match task_service::update_task(
+        task_id,
+        payload,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+        &zmq_senders.tasks,
+    ) {
+        Ok(_) => mutation_success_response("Задача обновлена.", None),
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to update task from API: {err}");
+            mutation_error_response(&err)
+        }
+    }
+}
+
+#[post("/v1/tasks/{task_id}/status")]
+/// Apply a quick status transition from the React-owned task details page.
+pub async fn api_v1_update_task_status(
+    task_id: web::Path<i32>,
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    zmq_senders: web::Data<ZmqSenders>,
+    web::Form(form): web::Form<QuickTaskStatusForm>,
+) -> impl Responder {
+    let task_id = task_id.into_inner();
+    let payload = match QuickTaskStatusPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => return form_error_response(&err),
+    };
+
+    let zmq_senders = zmq_senders.get_ref();
+    match task_service::transition_task_status(
+        task_id,
+        payload,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+        &zmq_senders.tasks,
+    ) {
+        Ok(_) => mutation_success_response("Статус задачи обновлён.", None),
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to update task status from API: {err}");
+            mutation_error_response(&err)
+        }
+    }
+}
+
+#[post("/v1/tasks/{task_id}/comments")]
+/// Add a task comment from the React-owned task details page.
+pub async fn api_v1_add_task_comment(
+    task_id: web::Path<i32>,
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    zmq_senders: web::Data<ZmqSenders>,
+    web::Form(form): web::Form<TaskCommentForm>,
+) -> impl Responder {
+    let task_id = task_id.into_inner();
+    let payload = match TaskCommentPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => return form_error_response(&err),
+    };
+
+    let zmq_senders = zmq_senders.get_ref();
+    match task_service::add_task_comment(
+        task_id,
+        payload,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+    ) {
+        Ok(_) => mutation_success_response("Комментарий добавлен.", None),
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to add task comment from API: {err}");
+            mutation_error_response(&err)
+        }
+    }
+}
+
+#[post("/v1/tasks/{task_id}/delete")]
+/// Delete a task from the React-owned task details page.
+pub async fn api_v1_delete_task(
+    task_id: web::Path<i32>,
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+) -> impl Responder {
+    let task_id = task_id.into_inner();
+
+    match task_service::delete_task(task_id, &user, repo.get_ref()) {
+        Ok(()) => mutation_success_response("Задача удалена.", Some("/".to_string())),
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to delete task from API: {err}");
             mutation_error_response(&err)
         }
     }

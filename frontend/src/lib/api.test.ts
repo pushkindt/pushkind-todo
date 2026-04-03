@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ApiResponseFailure,
   ApiMutationFailure,
+  createTaskComment,
   createTask,
+  deleteTask,
   fetchClients,
   fetchTaskCollection,
   fetchTaskDetails,
@@ -10,6 +13,8 @@ import {
   fetchUsers,
   parseApiMutationError,
   parseApiMutationSuccess,
+  updateTask,
+  updateTaskStatus,
   uploadTasks,
 } from "./api";
 
@@ -139,6 +144,7 @@ describe("api", () => {
             id: 7,
             name: "ACME",
             public_id: "client-7",
+            url: "https://crm.example.com/?public_id=client-7",
           },
           events: [
             {
@@ -161,6 +167,9 @@ describe("api", () => {
 
     expect(response.task.authorId).toBe(1);
     expect(response.assignee?.email).toBe("worker@example.com");
+    expect(response.client?.url).toBe(
+      "https://crm.example.com/?public_id=client-7",
+    );
     expect(response.events[0].eventType).toBe("Comment");
     expect(response.events[0].eventData).toEqual({ text: "Started" });
   });
@@ -236,6 +245,75 @@ describe("api", () => {
     expect(response.message).toBe("Задача добавлена.");
   });
 
+  it("task detail mutations submit to the expected endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          message: "Задача обновлена.",
+          redirect_to: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          message: "Статус задачи обновлён.",
+          redirect_to: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          message: "Комментарий добавлен.",
+          redirect_to: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          message: "Задача удалена.",
+          redirect_to: "/",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updateResponse = await updateTask(
+      5,
+      new URLSearchParams({ title: "Renamed task", status: "InProgress" }),
+    );
+    const statusResponse = await updateTaskStatus(
+      5,
+      new URLSearchParams({ status: "Completed" }),
+    );
+    const commentResponse = await createTaskComment(
+      5,
+      new URLSearchParams({ message: "<p>Done</p>" }),
+    );
+    const deleteResponse = await deleteTask(5);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/tasks/5/update",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/tasks/5/status",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/tasks/5/comments",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/v1/tasks/5/delete",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(updateResponse.message).toBe("Задача обновлена.");
+    expect(statusResponse.message).toBe("Статус задачи обновлён.");
+    expect(commentResponse.message).toBe("Комментарий добавлен.");
+    expect(deleteResponse.redirectTo).toBe("/");
+  });
+
   it("uploadTasks parses structured mutation failures", async () => {
     vi.stubGlobal(
       "fetch",
@@ -282,5 +360,27 @@ describe("api", () => {
     await expect(fetchTaskCollection()).rejects.toThrow(
       "Недостаточно прав для доступа к ToDo.",
     );
+  });
+
+  it("surfaces not found responses as ApiResponseFailure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const error = await fetchTaskDetails(404).catch(
+      (caughtError) => caughtError,
+    );
+
+    expect(error).toBeInstanceOf(ApiResponseFailure);
+    expect(error).toMatchObject({
+      status: 404,
+      message: "Ресурс не найден.",
+    });
   });
 });

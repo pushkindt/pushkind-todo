@@ -124,6 +124,7 @@ pub struct TaskClientSummaryDto {
     pub id: i32,
     pub name: String,
     pub public_id: String,
+    pub url: Option<String>,
 }
 
 impl From<&Client> for TaskClientSummaryDto {
@@ -132,6 +133,7 @@ impl From<&Client> for TaskClientSummaryDto {
             id: client.id.get(),
             name: client.name.to_string(),
             public_id: client.public_id.to_string(),
+            url: None,
         }
     }
 }

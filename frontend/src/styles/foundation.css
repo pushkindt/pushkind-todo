@@ -66,3 +66,19 @@ body {
   padding-top: 0.5rem;
   padding-bottom: 0.75rem;
 }
+
+.task-details-page-shell {
+  max-width: 960px;
+}
+
+.task-comment-preview {
+  min-height: 180px;
+}
+
+.task-event-item {
+  scroll-margin-top: 5rem;
+}
+
+.task-event-payload {
+  overflow-wrap: anywhere;
+}

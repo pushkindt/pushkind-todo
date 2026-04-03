@@ -39,6 +39,7 @@ export type TaskClientSummary = {
   id: number;
   name: string;
   publicId: string;
+  url?: string;
 };
 
 export type TaskListItem = {

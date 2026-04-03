@@ -1,57 +1,44 @@
 //! Routes focused on task-specific views, updates, and modal interactions.
-use actix_web::{HttpResponse, Responder, get, post, web};
-use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
+use std::path::Path;
+
+use actix_web::{Either, HttpResponse, Responder, get, post, web};
+use actix_web_flash_messages::FlashMessage;
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
-use pushkind_common::routes::{base_context, redirect, render_template};
+use pushkind_common::routes::{ensure_role, redirect, render_template};
 use tera::{Context, Tera};
 
+use crate::SERVICE_ACCESS_ROLE;
 use crate::forms::task::{
     QuickTaskStatusForm, QuickTaskStatusPayload, TaskCommentForm, TaskCommentPayload,
     UpdateTaskForm, UpdateTaskPayload,
 };
-use crate::models::config::ServerConfig;
+use crate::frontend::{FRONTEND_DIST_DIR, FRONTEND_TASK_DOCUMENT, open_frontend_html};
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, task as task_service};
 
-/// Display a task’s detail page with events, assignee, and author info.
+/// Display the React-backed task page after access checks succeed.
 #[get("/task/{task_id}")]
-pub async fn show_task(
-    task_id: web::Path<i32>,
-    user: AuthenticatedUser,
-    repo: web::Data<DieselRepository>,
-    flash_messages: IncomingFlashMessages,
-    server_config: web::Data<ServerConfig>,
-    common_config: web::Data<CommonServerConfig>,
-    tera: web::Data<Tera>,
-) -> impl Responder {
-    let task_id = task_id.into_inner();
-
-    match task_service::load_task_details(task_id, &user, repo.get_ref()) {
-        Ok(details) => {
-            let mut context = base_context(
-                &flash_messages,
-                &user,
-                "task",
-                &common_config.auth_service_url,
-            );
-            context.insert("task", &details.task);
-            context.insert("author", &details.author);
-            context.insert("assignee", &details.assignee);
-            context.insert("client", &details.client);
-            context.insert("events", &details.events);
-            context.insert("crm_service_url", &server_config.crm_service_url);
-            render_template(&tera, "task/index.html", &context)
-        }
+pub async fn show_task(_task_id: web::Path<i32>, user: AuthenticatedUser) -> impl Responder {
+    match ensure_role(&user, SERVICE_ACCESS_ROLE) {
+        Ok(_) => {}
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
-            redirect("/na")
+            return Either::Right(redirect("/na"));
         }
-        Err(ServiceError::NotFound) => HttpResponse::NotFound().finish(),
         Err(err) => {
-            log::error!("Failed to load task {task_id}: {err}");
-            HttpResponse::InternalServerError().finish()
+            log::error!("Failed to authorize task page access: {err}");
+            return Either::Right(HttpResponse::InternalServerError().finish());
+        }
+    }
+
+    let task_document = Path::new(FRONTEND_DIST_DIR).join(FRONTEND_TASK_DOCUMENT);
+    match open_frontend_html(&task_document).await {
+        Ok(document) => Either::Left(document),
+        Err(err) => {
+            log::error!("Failed to open built task document: {err}");
+            Either::Right(HttpResponse::InternalServerError().finish())
         }
     }
 }

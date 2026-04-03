@@ -171,6 +171,7 @@ function parseTaskClientSummary(payload: unknown): TaskClientSummary {
     id: readNumber(payload, "id"),
     name: readString(payload, "name"),
     publicId: readString(payload, "public_id"),
+    url: readOptionalString(payload, "url"),
   };
 }
 
@@ -431,6 +432,16 @@ export class ApiMutationFailure extends Error {
   }
 }
 
+export class ApiResponseFailure extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiResponseFailure";
+    this.status = status;
+  }
+}
+
 function withBaseUrl(baseUrl: string, path: string) {
   return new URL(path, baseUrl).toString();
 }
@@ -487,10 +498,20 @@ async function fetchJson(url: string) {
 
   if (!response.ok) {
     if (response.status === 401) {
-      throw new Error("Недостаточно прав для доступа к ToDo.");
+      throw new ApiResponseFailure(
+        response.status,
+        "Недостаточно прав для доступа к ToDo.",
+      );
     }
 
-    throw new Error(`Request failed with status ${response.status}.`);
+    if (response.status === 404) {
+      throw new ApiResponseFailure(response.status, "Ресурс не найден.");
+    }
+
+    throw new ApiResponseFailure(
+      response.status,
+      `Request failed with status ${response.status}.`,
+    );
   }
 
   ensureResponseIsNotAuthRedirect(response);
@@ -578,6 +599,34 @@ export async function createTask(
 
 export async function uploadTasks(form: FormData): Promise<ApiMutationSuccess> {
   return submitMutation("/api/v1/tasks/upload", form);
+}
+
+export async function updateTask(
+  taskId: number,
+  form: URLSearchParams,
+): Promise<ApiMutationSuccess> {
+  return submitMutation(`/api/v1/tasks/${taskId}/update`, form);
+}
+
+export async function updateTaskStatus(
+  taskId: number,
+  form: URLSearchParams,
+): Promise<ApiMutationSuccess> {
+  return submitMutation(`/api/v1/tasks/${taskId}/status`, form);
+}
+
+export async function createTaskComment(
+  taskId: number,
+  form: URLSearchParams,
+): Promise<ApiMutationSuccess> {
+  return submitMutation(`/api/v1/tasks/${taskId}/comments`, form);
+}
+
+export async function deleteTask(taskId: number): Promise<ApiMutationSuccess> {
+  return submitMutation(
+    `/api/v1/tasks/${taskId}/delete`,
+    new URLSearchParams(),
+  );
 }
 
 export async function fetchHubMenuItems(
