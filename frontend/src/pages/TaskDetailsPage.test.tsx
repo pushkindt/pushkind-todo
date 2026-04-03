@@ -81,7 +81,6 @@ function renderScreen(
       completeErrorMessage=""
       completeSubmitting={false}
       deleteSubmitting={false}
-      onDismissNotice={() => {}}
       onOpenEdit={() => {}}
       onCloseEdit={() => {}}
       onRequestDelete={() => {}}

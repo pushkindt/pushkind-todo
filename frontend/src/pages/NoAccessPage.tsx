@@ -47,36 +47,16 @@ export function NoAccessPage() {
     };
   }, []);
 
-  if (shellState.status === "loading" || noAccessState.status === "loading") {
-    return (
-      <main className="container py-5">
-        <div className="alert alert-secondary mb-0" role="status">
-          Загрузка...
-        </div>
-      </main>
-    );
-  }
-
   if (shellState.status === "error") {
     return <TodoShellFatalState message={shellState.message} />;
   }
 
+  if (shellState.status === "loading" || noAccessState.status === "loading") {
+    return null;
+  }
+
   if (noAccessState.status === "error") {
-    return (
-      <TodoShell
-        navigation={shellState.shell.navigation}
-        currentUserEmail={shellState.shell.currentUser.email}
-        homeUrl={shellState.shell.homeUrl}
-        localMenuItems={shellState.shell.localMenuItems}
-        fetchedMenuItems={shellState.authMenuItems}
-      >
-        <main className="container py-5 todo-shell-content">
-          <div className="alert alert-danger mb-0" role="alert">
-            {noAccessState.message}
-          </div>
-        </main>
-      </TodoShell>
-    );
+    return <TodoShellFatalState message={noAccessState.message} />;
   }
 
   return (

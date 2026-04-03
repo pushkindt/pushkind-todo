@@ -6,6 +6,32 @@ body {
   min-height: 100vh;
 }
 
+.todo-foundation-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.todo-foundation-card {
+  width: min(100%, 36rem);
+  background: #fff;
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 1rem;
+  box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.08);
+  padding: 2rem;
+}
+
+.todo-foundation-eyebrow {
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color, #6c757d);
+}
+
 .phase-one-placeholder {
   min-height: 100vh;
 }

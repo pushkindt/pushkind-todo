@@ -24,11 +24,7 @@ import type {
   TaskUserSummary,
   UserMenuItem,
 } from "../lib/models";
-import {
-  formatTaskDate,
-  formatTaskDateTime,
-  parseTaskIdFromPathname,
-} from "../lib/taskDetails";
+import { formatTaskDate, parseTaskIdFromPathname } from "../lib/taskDetails";
 import { useTodoShell } from "../lib/useTodoShell";
 
 type TaskDetailsLoadState =
@@ -37,16 +33,10 @@ type TaskDetailsLoadState =
   | { status: "not-found" }
   | { status: "error"; message: string; previousData?: TaskDetailsData };
 
-type PageNotice = {
-  tone: "success" | "danger" | "secondary" | "warning";
-  message: string;
-};
-
 type TaskDetailsScreenProps = {
   shell: ShellData;
   fetchedMenuItems: UserMenuItem[];
   details: TaskDetailsData;
-  notice?: PageNotice;
   isRefreshing: boolean;
   editOpen: boolean;
   completeOpen: boolean;
@@ -61,7 +51,6 @@ type TaskDetailsScreenProps = {
   completeErrorMessage: string;
   completeSubmitting: boolean;
   deleteSubmitting: boolean;
-  onDismissNotice: () => void;
   onOpenEdit: () => void;
   onCloseEdit: () => void;
   onRequestDelete: () => void;
@@ -133,7 +122,6 @@ export function TaskDetailsScreen({
   shell,
   fetchedMenuItems,
   details,
-  notice,
   isRefreshing,
   editOpen,
   completeOpen,
@@ -148,7 +136,6 @@ export function TaskDetailsScreen({
   completeErrorMessage,
   completeSubmitting,
   deleteSubmitting,
-  onDismissNotice,
   onOpenEdit,
   onCloseEdit,
   onRequestDelete,
@@ -176,21 +163,6 @@ export function TaskDetailsScreen({
     >
       <main className="todo-shell-content">
         <div className="container my-3">
-          {notice ? (
-            <div
-              className={`alert alert-${notice.tone} alert-dismissible`}
-              role="alert"
-            >
-              {notice.message}
-              <button
-                type="button"
-                className="btn-close"
-                aria-label="Close"
-                onClick={onDismissNotice}
-              />
-            </div>
-          ) : null}
-
           {isRefreshing ? (
             <div className="alert alert-secondary py-2" role="status">
               Загрузка...
@@ -488,9 +460,6 @@ export function TaskDetailsPage() {
   const [detailsState, setDetailsState] = useState<TaskDetailsLoadState>(
     taskId ? { status: "loading" } : { status: "not-found" },
   );
-  const [pageNotice, setPageNotice] = useState<PageNotice | undefined>(
-    undefined,
-  );
   const [refreshToken, setRefreshToken] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -571,18 +540,21 @@ export function TaskDetailsPage() {
     };
   }, [refreshToken, taskId]);
 
-  if (shellState.status === "loading") {
-    return (
-      <main className="container py-5">
-        <div className="alert alert-secondary mb-0" role="status">
-          Загрузка...
-        </div>
-      </main>
-    );
-  }
+  useEffect(() => {
+    if (detailsState.status === "error" && detailsState.previousData != null) {
+      window.showFlashMessage?.(detailsState.message, "danger");
+    }
+  }, [detailsState]);
 
   if (shellState.status === "error") {
     return <TodoShellFatalState message={shellState.message} />;
+  }
+
+  if (
+    shellState.status === "loading" ||
+    (detailsState.status === "loading" && detailsState.previousData == null)
+  ) {
+    return null;
   }
 
   const details =
@@ -591,6 +563,10 @@ export function TaskDetailsPage() {
       : detailsState.status === "loading" || detailsState.status === "error"
         ? detailsState.previousData
         : undefined;
+
+  if (detailsState.status === "error" && !details) {
+    return <TodoShellFatalState message={detailsState.message} />;
+  }
 
   if (!details) {
     return (
@@ -602,19 +578,8 @@ export function TaskDetailsPage() {
         fetchedMenuItems={shellState.authMenuItems}
       >
         <main className="container py-5 todo-shell-content">
-          <div
-            className={`alert ${
-              detailsState.status === "not-found"
-                ? "alert-warning"
-                : "alert-danger"
-            } mb-0`}
-            role="alert"
-          >
-            {detailsState.status === "not-found"
-              ? "Задача не найдена."
-              : detailsState.status === "error"
-                ? detailsState.message
-                : "Загрузка..."}
+          <div className="alert alert-warning mb-0" role="alert">
+            Задача не найдена.
           </div>
         </main>
       </TodoShell>
@@ -622,7 +587,7 @@ export function TaskDetailsPage() {
   }
 
   const refreshDetails = (message: string) => {
-    setPageNotice({ tone: "success", message });
+    window.showFlashMessage?.(message, "primary");
     setRefreshToken((current) => current + 1);
   };
 
@@ -631,11 +596,6 @@ export function TaskDetailsPage() {
       shell={shellState.shell}
       fetchedMenuItems={shellState.authMenuItems}
       details={details}
-      notice={
-        detailsState.status === "error"
-          ? { tone: "danger", message: detailsState.message }
-          : pageNotice
-      }
       isRefreshing={detailsState.status === "loading"}
       editOpen={editOpen}
       completeOpen={completeOpen}
@@ -650,7 +610,6 @@ export function TaskDetailsPage() {
       completeErrorMessage={completeErrorMessage}
       completeSubmitting={completeSubmitting}
       deleteSubmitting={deleteSubmitting}
-      onDismissNotice={() => setPageNotice(undefined)}
       onOpenEdit={() => setEditOpen(true)}
       onCloseEdit={() => setEditOpen(false)}
       onRequestDelete={() => {
@@ -660,7 +619,6 @@ export function TaskDetailsPage() {
       onCloseDelete={() => setDeleteOpen(false)}
       onConfirmDelete={() => {
         setDeleteSubmitting(true);
-        setPageNotice(undefined);
 
         void deleteTask(details.task.id)
           .then((response) => {
@@ -669,10 +627,10 @@ export function TaskDetailsPage() {
           .catch((error) => {
             setDeleteSubmitting(false);
             setDeleteOpen(false);
-            setPageNotice({
-              tone: "danger",
-              message: errorMessage(error, "Не удалось удалить задачу."),
-            });
+            window.showFlashMessage?.(
+              errorMessage(error, "Не удалось удалить задачу."),
+              "danger",
+            );
           });
       }}
       onTakeInWork={() => {
@@ -681,20 +639,16 @@ export function TaskDetailsPage() {
         form.set("assign_self", "true");
 
         setQuickActionSubmitting(true);
-        setPageNotice(undefined);
 
         void updateTaskStatus(details.task.id, form)
           .then((response) => {
             refreshDetails(response.message);
           })
           .catch((error) => {
-            setPageNotice({
-              tone: "danger",
-              message: errorMessage(
-                error,
-                "Не удалось обновить статус задачи.",
-              ),
-            });
+            window.showFlashMessage?.(
+              errorMessage(error, "Не удалось обновить статус задачи."),
+              "danger",
+            );
           })
           .finally(() => {
             setQuickActionSubmitting(false);
@@ -765,7 +719,6 @@ export function TaskDetailsPage() {
 
         setCompleteSubmitting(true);
         setCompleteErrorMessage("");
-        setPageNotice(undefined);
 
         void updateTaskStatus(details.task.id, form)
           .then((response) => {

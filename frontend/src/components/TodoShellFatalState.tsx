@@ -4,10 +4,12 @@ type TodoShellFatalStateProps = {
 
 export function TodoShellFatalState({ message }: TodoShellFatalStateProps) {
   return (
-    <main className="container py-5">
-      <div className="alert alert-danger mb-0" role="alert">
-        {message}
-      </div>
+    <main className="todo-foundation-shell">
+      <section className="todo-foundation-card">
+        <p className="todo-foundation-eyebrow">ToDo</p>
+        <h1>Не удалось открыть React-оболочку ToDo</h1>
+        <p className="mb-0 text-secondary">{message}</p>
+      </section>
     </main>
   );
 }

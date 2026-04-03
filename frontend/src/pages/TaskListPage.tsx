@@ -31,11 +31,6 @@ type CollectionLoadState =
   | { status: "ready"; data: TaskCollectionData }
   | { status: "error"; message: string; previousData?: TaskCollectionData };
 
-type PageNotice = {
-  tone: "success" | "danger" | "secondary";
-  message: string;
-};
-
 type TaskListSearchFormProps = {
   searchValue?: string;
   onSubmit: (search: string | undefined) => void;
@@ -45,12 +40,10 @@ type TaskListScreenProps = {
   shell: ShellData;
   fetchedMenuItems: UserMenuItem[];
   collection: TaskCollectionData;
-  notice?: PageNotice;
   isRefreshing: boolean;
   filtersOpen: boolean;
   addTaskOpen: boolean;
   prefillAssignee?: TaskAssigneePrefill;
-  onDismissNotice: () => void;
   onSearchSubmit: (search: string | undefined) => void;
   onOpenFilters: () => void;
   onCloseFilters: () => void;
@@ -184,12 +177,10 @@ export function TaskListScreen({
   shell,
   fetchedMenuItems,
   collection,
-  notice,
   isRefreshing,
   filtersOpen,
   addTaskOpen,
   prefillAssignee,
-  onDismissNotice,
   onSearchSubmit,
   onOpenFilters,
   onCloseFilters,
@@ -220,20 +211,6 @@ export function TaskListScreen({
     >
       <main className="todo-shell-content">
         <div className="container bg-white border rounded my-2 task-list-page-shell">
-          {notice ? (
-            <div
-              className={`alert alert-${notice.tone} alert-dismissible mb-3`}
-              role="alert"
-            >
-              {notice.message}
-              <button
-                type="button"
-                className="btn-close"
-                onClick={onDismissNotice}
-                aria-label="Close"
-              />
-            </div>
-          ) : null}
           <div className="row">
             <div className="col text-center add-task-container">
               <button
@@ -332,9 +309,6 @@ export function TaskListPage() {
   });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
-  const [pageNotice, setPageNotice] = useState<PageNotice | undefined>(
-    undefined,
-  );
   const [refreshToken, setRefreshToken] = useState(0);
   const [prefillAssignee, setPrefillAssignee] = useState<
     TaskAssigneePrefill | undefined
@@ -415,18 +389,25 @@ export function TaskListPage() {
     };
   }, [locationSearch, refreshToken]);
 
-  if (shellState.status === "loading") {
-    return (
-      <main className="container py-5">
-        <div className="alert alert-secondary mb-0" role="status">
-          Загрузка...
-        </div>
-      </main>
-    );
-  }
+  useEffect(() => {
+    if (
+      collectionState.status === "error" &&
+      collectionState.previousData != null
+    ) {
+      window.showFlashMessage?.(collectionState.message, "danger");
+    }
+  }, [collectionState]);
 
   if (shellState.status === "error") {
     return <TodoShellFatalState message={shellState.message} />;
+  }
+
+  if (
+    shellState.status === "loading" ||
+    (collectionState.status === "loading" &&
+      collectionState.previousData == null)
+  ) {
+    return null;
   }
 
   const collection =
@@ -434,24 +415,12 @@ export function TaskListPage() {
       ? collectionState.data
       : collectionState.previousData;
 
+  if (collectionState.status === "error" && !collection) {
+    return <TodoShellFatalState message={collectionState.message} />;
+  }
+
   if (!collection) {
-    return (
-      <TodoShell
-        navigation={shellState.shell.navigation}
-        currentUserEmail={shellState.shell.currentUser.email}
-        homeUrl={shellState.shell.homeUrl}
-        localMenuItems={shellState.shell.localMenuItems}
-        fetchedMenuItems={shellState.authMenuItems}
-      >
-        <main className="container py-5 todo-shell-content">
-          <div className="alert alert-danger mb-0" role="alert">
-            {collectionState.status === "error"
-              ? collectionState.message
-              : "Загрузка..."}
-          </div>
-        </main>
-      </TodoShell>
-    );
+    return null;
   }
 
   const navigateToSearch = (nextSearch: string) => {
@@ -470,16 +439,10 @@ export function TaskListPage() {
       shell={shellState.shell}
       fetchedMenuItems={shellState.authMenuItems}
       collection={collection}
-      notice={
-        collectionState.status === "error"
-          ? { tone: "danger", message: collectionState.message }
-          : pageNotice
-      }
       isRefreshing={collectionState.status === "loading"}
       filtersOpen={filtersOpen}
       addTaskOpen={addTaskOpen}
       prefillAssignee={prefillAssignee}
-      onDismissNotice={() => setPageNotice(undefined)}
       onSearchSubmit={(search) => {
         navigateToSearch(
           buildTaskListSearch({
@@ -503,7 +466,7 @@ export function TaskListPage() {
         setAddTaskOpen(false);
       }}
       onMutationSuccess={(message) => {
-        setPageNotice({ tone: "success", message });
+        window.showFlashMessage?.(message, "primary");
         setAddTaskOpen(false);
         setPrefillAssignee(undefined);
         setRefreshToken((current) => current + 1);

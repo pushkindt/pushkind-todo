@@ -52,7 +52,6 @@ describe("TaskListScreen", () => {
         isRefreshing={false}
         filtersOpen={false}
         addTaskOpen={false}
-        onDismissNotice={() => {}}
         onSearchSubmit={() => {}}
         onOpenFilters={() => {}}
         onCloseFilters={() => {}}
@@ -96,7 +95,6 @@ describe("TaskListScreen", () => {
         isRefreshing={false}
         filtersOpen={false}
         addTaskOpen={false}
-        onDismissNotice={() => {}}
         onSearchSubmit={() => {}}
         onOpenFilters={() => {}}
         onCloseFilters={() => {}}
