@@ -11,8 +11,6 @@ use actix_web::cookie::Key;
 #[cfg(feature = "server")]
 use actix_web::{App, HttpServer, middleware, web};
 #[cfg(feature = "server")]
-use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
-#[cfg(feature = "server")]
 use pushkind_common::db::establish_connection_pool;
 #[cfg(feature = "server")]
 use pushkind_common::middleware::RedirectUnauthorized;
@@ -22,8 +20,6 @@ use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::logout;
 #[cfg(feature = "server")]
 use pushkind_common::zmq::{ZmqSender, ZmqSenderOptions};
-#[cfg(feature = "server")]
-use tera::Tera;
 
 #[cfg(feature = "server")]
 use crate::models::config::{ServerConfig, ZmqSenders};
@@ -38,11 +34,9 @@ use crate::routes::api::{
 #[cfg(feature = "server")]
 use crate::routes::aux::not_assigned;
 #[cfg(feature = "server")]
-use crate::routes::main::{add_task, show_index, tasks_upload};
+use crate::routes::main::show_index;
 #[cfg(feature = "server")]
-use crate::routes::task::{
-    add_task_comment, delete_task, quick_update_task_status, show_task, task_modal, update_task,
-};
+use crate::routes::task::show_task;
 
 #[cfg(feature = "data")]
 pub mod domain;
@@ -98,20 +92,13 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
 
     let repo = DieselRepository::new(pool);
 
-    // Keys and stores for identity, sessions, and flash messages.
+    // Key used for identity and session cookies.
     let secret_key = Key::from(server_config.secret.as_bytes());
-
-    let message_store = CookieMessageStore::builder(secret_key.clone()).build();
-    let message_framework = FlashMessagesFramework::builder(message_store).build();
-
-    let tera = Tera::new(&server_config.templates_dir)
-        .map_err(|e| std::io::Error::other(format!("Template parsing error(s): {e}")))?;
 
     let bind_address = (server_config.address.clone(), server_config.port);
 
     HttpServer::new(move || {
         App::new()
-            .wrap(message_framework.clone())
             .wrap(IdentityMiddleware::default())
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
@@ -143,17 +130,9 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
                 web::scope("")
                     .wrap(RedirectUnauthorized)
                     .service(show_index)
-                    .service(add_task)
-                    .service(tasks_upload)
                     .service(show_task)
-                    .service(task_modal)
-                    .service(add_task_comment)
-                    .service(update_task)
-                    .service(quick_update_task_status)
-                    .service(delete_task)
                     .service(logout),
             )
-            .app_data(web::Data::new(tera.clone()))
             .app_data(web::Data::new(repo.clone()))
             .app_data(web::Data::new(server_config.clone()))
             .app_data(web::Data::new(common_config.clone()))

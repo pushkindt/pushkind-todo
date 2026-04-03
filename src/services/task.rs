@@ -28,7 +28,7 @@ use crate::services::{ServiceError, ServiceResult};
 use serde_json::{Value, json};
 
 use super::notifications;
-use crate::dto::task::{TaskDetails, TaskEventWithAuthor, TaskModalData};
+use crate::dto::task::{TaskDetails, TaskEventWithAuthor};
 
 /// Load a task and its events for the provided user, enriching with user data.
 pub fn load_task_details<R>(
@@ -106,50 +106,6 @@ where
         author,
         assignee,
         events,
-        client,
-    })
-}
-
-/// Load the task along with supporting data required by the modal view.
-pub fn load_task_modal<R>(
-    task_id: i32,
-    user: &AuthenticatedUser,
-    repo: &R,
-) -> ServiceResult<TaskModalData>
-where
-    R: TaskReader + UserReader + ClientReader + ?Sized,
-{
-    ensure_role(user, SERVICE_ACCESS_ROLE)?;
-
-    let hub_id = HubId::new(user.hub_id)?;
-    let task_id = TaskId::new(task_id)?;
-
-    let task = repo
-        .get_task_by_id(task_id, hub_id)?
-        .ok_or(ServiceError::NotFound)?;
-
-    let assignee = match task.assigned_to {
-        Some(assignee_id) => match repo.get_user_by_id(assignee_id, hub_id) {
-            Ok(Some(user)) => Some(user),
-            Ok(None) => None,
-            Err(err) => return Err(ServiceError::from(err)),
-        },
-        None => None,
-    };
-    let client = match task.client_id {
-        Some(client_id) => match repo.get_client_by_id(client_id, hub_id) {
-            Ok(client) => client,
-            Err(err) => return Err(ServiceError::from(err)),
-        },
-        None => None,
-    };
-
-    let tracks = repo.list_task_tracks(hub_id)?;
-
-    Ok(TaskModalData {
-        task,
-        assignee,
-        tracks,
         client,
     })
 }

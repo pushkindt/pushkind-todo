@@ -14,7 +14,6 @@ server = [
     "actix-multipart",
     "actix-session",
     "actix-web",
-    "actix-web-flash-messages",
     "config",
     "csv",
     "dotenvy",
@@ -24,7 +23,6 @@ server = [
     "pushkind-common/db",
     "pushkind-common/zeromq",
     "serde_html_form",
-    "tera",
 ]
 
 [[bin]]
@@ -40,9 +38,6 @@ actix-session = { version = "0.11.0", features = [
     "cookie-session",
 ], optional = true }
 actix-web = { version = "4.12.1", optional = true }
-actix-web-flash-messages = { version = "0.5.0", features = [
-    "cookies",
-], optional = true }
 chrono = { version = "0.4.43", features = ["serde"] }
 csv = { version = "1.4.0", optional = true }
 diesel = { version = "2.3.6", features = [
@@ -58,7 +53,6 @@ log = "0.4.29"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_html_form = { version = "0.4.0", optional = true }
 serde_json = "1.0.147"
-tera = { version = "1.20.1", features = ["builtins"], optional = true }
 thiserror = "2.0.18"
 pushkind-common = { git = "https://github.com/pushkindt/pushkind-common.git", branch = "main", default-features = false, optional = true }
 validator = { version = "0.20.0", features = ["derive"] }

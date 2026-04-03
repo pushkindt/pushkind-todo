@@ -12,7 +12,6 @@ pub struct ServerConfig {
     pub database_url: String,
     pub zmq_emailer_pub: String,
     pub zmq_tasks_pub: String,
-    pub templates_dir: String,
     pub secret: String,
     pub auth_service_url: String,
     pub crm_service_url: String,
