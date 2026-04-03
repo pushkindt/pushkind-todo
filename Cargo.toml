@@ -31,23 +31,23 @@ path = "src/main.rs"
 required-features = ["server"]
 
 [dependencies]
-actix-files = { version = "0.6.9", optional = true }
+actix-files = { version = "0.6.10", optional = true }
 actix-identity = { version = "0.9.0", optional = true }
 actix-multipart = { version = "0.7.2", optional = true }
 actix-session = { version = "0.11.0", features = [
     "cookie-session",
 ], optional = true }
-actix-web = { version = "4.12.1", optional = true }
-chrono = { version = "0.4.43", features = ["serde"] }
+actix-web = { version = "4.13.0", optional = true }
+chrono = { version = "0.4.44", features = ["serde"] }
 csv = { version = "1.4.0", optional = true }
-diesel = { version = "2.3.6", features = [
+diesel = { version = "2.3.7", features = [
     "sqlite",
     "r2d2",
     "chrono",
     "returning_clauses_for_sqlite_3_35",
 ] }
 dotenvy = { version = "0.15.7", optional = true }
-env_logger = { version = "0.11.8", optional = true }
+env_logger = { version = "0.11.10", optional = true }
 lazy_static = "1.5.0"
 log = "0.4.29"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -63,7 +63,7 @@ config = { version = "0.15.19", default-features = false, features = [
 pushkind-emailer = { git = "https://github.com/pushkindt/pushkind-emailer.git", version = "0.1.0", features = [
     "data",
 ], default-features = false, optional = true }
-uuid = { version = "1.20.0", features = ["v4", "serde"] }
+uuid = { version = "1.23.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 diesel_migrations = "2.3.1"

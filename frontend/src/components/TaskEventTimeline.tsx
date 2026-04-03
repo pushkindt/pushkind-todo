@@ -65,10 +65,20 @@ function UserLabel({ user }: { user?: TaskUserSummary }) {
   }
 
   return (
-    <span title={user.email}>
-      <i className="bi bi-person-circle me-1" />
+    <a
+      role="button"
+      tabIndex={0}
+      data-bs-trigger="focus"
+      data-bs-toggle="popover"
+      title={user.name}
+      data-bs-content={user.email}
+      data-bs-original-title={user.name}
+      aria-label={user.name}
+    >
+      <i className="bi bi-person-circle" />
+      &nbsp;
       {user.name}
-    </span>
+    </a>
   );
 }
 

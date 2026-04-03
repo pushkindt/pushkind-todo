@@ -4,10 +4,10 @@ use std::path::Path;
 use actix_web::{Either, HttpResponse, Responder, get, web};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::routes::{ensure_role, redirect};
+use pushkind_common::services::errors::ServiceError;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::frontend::{FRONTEND_DIST_DIR, FRONTEND_TASK_DOCUMENT, open_frontend_html};
-use crate::services::ServiceError;
 
 /// Display the React-backed task page after access checks succeed.
 #[get("/task/{task_id}")]

@@ -3,6 +3,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::pagination::{DEFAULT_ITEMS_PER_PAGE, Paginated};
 use pushkind_common::routes::ensure_role;
+use pushkind_common::services::errors::{ServiceError, ServiceResult};
 use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::NewEmail;
 use std::collections::HashMap;
@@ -18,7 +19,6 @@ use crate::forms::main::{AddTaskPayload, UploadTasksPayload};
 use crate::repository::{
     ClientReader, TaskListQuery, TaskReader, TaskWriter, UserListQuery, UserReader, UserWriter,
 };
-use crate::services::{ServiceError, ServiceResult};
 
 use super::notifications;
 use crate::dto::main::{IndexPageData, IndexPageFilters, IndexQuery, IndexTask};

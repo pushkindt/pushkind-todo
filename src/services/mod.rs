@@ -1,5 +1,4 @@
-//! Service layer root re-exporting shared error helpers and service submodules.
-pub use pushkind_common::services::errors::{ServiceError, ServiceResult};
+//! Service layer root exposing ToDo-specific service modules.
 
 pub mod api;
 pub mod main;

@@ -1,6 +1,7 @@
 //! Integration tests for React-facing API contracts.
 use chrono::NaiveDate;
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::services::errors::ServiceError;
 use serde_json::json;
 
 use pushkind_todo::domain::client::NewClient;
@@ -21,7 +22,7 @@ use pushkind_todo::services::api::{
     get_task_collection_data, get_task_details_data, list_clients, list_tracks, list_users,
 };
 use pushkind_todo::services::mock::MockZmqSender;
-use pushkind_todo::services::{ServiceError, task as task_service};
+use pushkind_todo::services::task as task_service;
 
 mod common;
 

@@ -6,6 +6,7 @@ use chrono::Local;
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::repository::errors::RepositoryError;
 use pushkind_common::routes::ensure_role;
+use pushkind_common::services::errors::{ServiceError, ServiceResult};
 use pushkind_common::zmq::ZmqSenderExt;
 use pushkind_emailer::domain::email::{NewEmail, NewEmailRecipient};
 
@@ -24,7 +25,6 @@ use crate::repository::{
     ClientReader, ClientWriter, TaskEventReader, TaskEventWriter, TaskReader, TaskWriter,
     UserReader, UserWriter,
 };
-use crate::services::{ServiceError, ServiceResult};
 use serde_json::{Value, json};
 
 use super::notifications;

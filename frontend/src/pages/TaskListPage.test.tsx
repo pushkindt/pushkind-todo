@@ -16,7 +16,7 @@ const shell = {
 };
 
 describe("TaskListScreen", () => {
-  it("renders task rows and active filter badge", () => {
+  it("renders task rows, active filter badge, and main-branch navbar search markup", () => {
     const markup = renderToStaticMarkup(
       <TaskListScreen
         shell={shell}
@@ -39,6 +39,7 @@ describe("TaskListScreen", () => {
             totalPages: 4,
           },
           activeFilters: {
+            search: "report",
             status: "InProgress",
           },
           recentlyUpdatedTaskIds: [5],
@@ -52,6 +53,7 @@ describe("TaskListScreen", () => {
         filtersOpen={false}
         addTaskOpen={false}
         onDismissNotice={() => {}}
+        onSearchSubmit={() => {}}
         onOpenFilters={() => {}}
         onCloseFilters={() => {}}
         onApplyFilters={() => {}}
@@ -66,6 +68,10 @@ describe("TaskListScreen", () => {
     expect(markup).toContain("В работе");
     expect(markup).toContain("Высокий");
     expect(markup).toContain("task-recent");
+    expect(markup).toContain('placeholder="Поиск"');
+    expect(markup).toContain('value="report"');
+    expect(markup).toContain("input-group");
+    expect(markup).toContain("bi-search");
   });
 
   it("renders the empty state when no tasks are present", () => {
@@ -91,6 +97,7 @@ describe("TaskListScreen", () => {
         filtersOpen={false}
         addTaskOpen={false}
         onDismissNotice={() => {}}
+        onSearchSubmit={() => {}}
         onOpenFilters={() => {}}
         onCloseFilters={() => {}}
         onApplyFilters={() => {}}

@@ -4,6 +4,7 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{HttpResponse, Responder, get, post, web};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
+use pushkind_common::services::errors::ServiceError;
 
 use crate::dto::api::{ClientLookupQueryDto, LookupQueryDto};
 use crate::dto::main::IndexQuery;
@@ -16,9 +17,9 @@ use crate::models::config::ServerConfig;
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::routes::{form_error_response, mutation_error_response, mutation_success_response};
+use crate::services::api as api_service;
 use crate::services::main as main_service;
 use crate::services::task as task_service;
-use crate::services::{ServiceError, api as api_service};
 
 #[get("/v1/iam")]
 /// Return typed shell data for React-owned ToDo pages.

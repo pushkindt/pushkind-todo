@@ -25,6 +25,7 @@ import type {
   UserMenuItem,
 } from "../lib/models";
 import {
+  formatTaskDate,
   formatTaskDateTime,
   parseTaskIdFromPathname,
 } from "../lib/taskDetails";
@@ -99,10 +100,20 @@ function TaskUserValue({ user }: { user?: TaskUserSummary }) {
   }
 
   return (
-    <span title={user.email}>
-      <i className="bi bi-person-circle me-1" />
+    <a
+      role="button"
+      tabIndex={0}
+      data-bs-trigger="focus"
+      data-bs-toggle="popover"
+      title={user.name}
+      data-bs-content={user.email}
+      data-bs-original-title={user.name}
+      aria-label={user.name}
+    >
+      <i className="bi bi-person-circle" />
+      &nbsp;
       {user.name}
-    </span>
+    </a>
   );
 }
 
@@ -164,7 +175,7 @@ export function TaskDetailsScreen({
       fetchedMenuItems={fetchedMenuItems}
     >
       <main className="todo-shell-content">
-        <div className="container my-3 task-details-page-shell">
+        <div className="container my-3">
           {notice ? (
             <div
               className={`alert alert-${notice.tone} alert-dismissible`}
@@ -187,9 +198,9 @@ export function TaskDetailsScreen({
           ) : null}
 
           <div className="card mb-3">
-            <div className="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+            <div className="card-header d-flex justify-content-between align-items-center">
               <h2 className="h5 mb-0">{details.task.title}</h2>
-              <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="d-flex align-items-center gap-2">
                 <TaskStatusBadge status={details.task.status} />
                 <button
                   type="button"
@@ -261,11 +272,11 @@ export function TaskDetailsScreen({
                     </dd>
                     <dt className="col-sm-4">Создана</dt>
                     <dd className="col-sm-8">
-                      {formatTaskDateTime(details.task.createdAt)}
+                      {formatTaskDate(details.task.createdAt)}
                     </dd>
                     <dt className="col-sm-4">Обновлена</dt>
                     <dd className="col-sm-8">
-                      {formatTaskDateTime(details.task.updatedAt)}
+                      {formatTaskDate(details.task.updatedAt)}
                     </dd>
                     <dt className="col-sm-4">Автор</dt>
                     <dd className="col-sm-8">
@@ -322,34 +333,41 @@ export function TaskDetailsScreen({
                   </button>
                 </li>
               </ul>
-              <div className="border border-top-0 rounded-bottom p-3">
-                {commentTab === "editor" ? (
-                  <>
-                    <textarea
-                      className={`form-control ${commentFieldError ? "is-invalid" : ""}`}
-                      rows={6}
-                      value={commentMarkdown}
-                      onChange={(event) => onCommentChange(event.target.value)}
-                      placeholder="Содержание в формате markdown"
-                    />
-                    {commentFieldError ? (
-                      <div className="invalid-feedback d-block">
-                        {commentFieldError}
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
+              <div className="tab-content mb-1">
+                <div
+                  className={`tab-pane fade ${commentTab === "editor" ? "show active" : ""}`}
+                  role="tabpanel"
+                >
+                  <textarea
+                    className={`form-control border-top-0 rounded-top-0 ${
+                      commentFieldError ? "is-invalid" : ""
+                    }`}
+                    rows={10}
+                    value={commentMarkdown}
+                    onChange={(event) => onCommentChange(event.target.value)}
+                    placeholder="Содержание в формате markdown"
+                  />
+                  {commentFieldError ? (
+                    <div className="invalid-feedback d-block">
+                      {commentFieldError}
+                    </div>
+                  ) : null}
+                </div>
+                <div
+                  className={`tab-pane fade ${commentTab === "preview" ? "show active" : ""}`}
+                  role="tabpanel"
+                >
                   <div
-                    className="task-comment-preview"
+                    className="border border-top-0 rounded rounded-top-0 p-2 task-comment-preview"
                     dangerouslySetInnerHTML={{
                       __html:
                         commentPreview ||
                         "<span class='text-muted'>Нет содержимого.</span>",
                     }}
                   />
-                )}
+                </div>
               </div>
-              <div className="d-flex justify-content-end gap-2 mt-3">
+              <div className="d-flex justify-content-end gap-2">
                 <button
                   type="button"
                   className="btn btn-primary"

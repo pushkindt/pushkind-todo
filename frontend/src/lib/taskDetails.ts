@@ -8,6 +8,19 @@ export function parseTaskIdFromPathname(pathname: string): number | undefined {
   return Number.isFinite(taskId) && taskId > 0 ? taskId : undefined;
 }
 
+export function formatTaskDate(value?: string): string {
+  if (!value) {
+    return "—";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "—";
+  }
+
+  return trimmed.slice(0, 10);
+}
+
 export function formatTaskDateTime(value?: string): string {
   if (!value) {
     return "—";

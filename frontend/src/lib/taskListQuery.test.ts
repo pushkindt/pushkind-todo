@@ -11,11 +11,12 @@ import {
 describe("taskListQuery", () => {
   it("parses and serializes supported list filters", () => {
     const parsed = parseTaskListQuery(
-      "?page=3&status=InProgress&track=Support&assignee=9&client=7&priority=High&updated_after=2024-02-01&updated_before=2024-02-10&public_id=task-5",
+      "?page=3&search=report&status=InProgress&track=Support&assignee=9&client=7&priority=High&updated_after=2024-02-01&updated_before=2024-02-10&public_id=task-5",
     );
 
     expect(parsed).toEqual({
       page: 3,
+      search: "report",
       status: "InProgress",
       track: "Support",
       assigneeId: 9,
@@ -28,6 +29,7 @@ describe("taskListQuery", () => {
     expect(
       buildTaskListSearch({
         page: 3,
+        search: "report",
         status: "InProgress",
         track: "Support",
         assigneeId: 9,
@@ -38,7 +40,7 @@ describe("taskListQuery", () => {
         publicId: "task-5",
       }),
     ).toBe(
-      "?page=3&status=InProgress&track=Support&assignee=9&client=7&priority=High&updated_after=2024-02-01&updated_before=2024-02-10&public_id=task-5",
+      "?page=3&search=report&status=InProgress&track=Support&assignee=9&client=7&priority=High&updated_after=2024-02-01&updated_before=2024-02-10&public_id=task-5",
     );
   });
 

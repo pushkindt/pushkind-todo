@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{check_role, ensure_role};
+use pushkind_common::services::errors::ServiceResult;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::dto::api::{
@@ -17,7 +18,7 @@ use crate::dto::main::IndexQuery;
 use crate::repository::{
     ClientReader, TaskEventReader, TaskReader, UserListQuery, UserReader, UserWriter,
 };
-use crate::services::{ServiceResult, main as main_service, task as task_service};
+use crate::services::{main as main_service, task as task_service};
 
 /// Returns shell data for authenticated users.
 ///

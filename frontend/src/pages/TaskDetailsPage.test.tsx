@@ -102,7 +102,7 @@ function renderScreen(
 }
 
 describe("TaskDetailsScreen", () => {
-  it("renders task metadata, quick actions, and the event timeline", () => {
+  it("renders task metadata, the legacy markdown composer structure, and the event timeline", () => {
     const markup = renderScreen();
 
     expect(markup).toContain("Prepare report");
@@ -112,6 +112,9 @@ describe("TaskDetailsScreen", () => {
     );
     expect(markup).toContain("Принято в работу");
     expect(markup).toContain("История событий");
+    expect(markup).toContain("tab-content mb-1");
+    expect(markup).toContain("border-top-0 rounded-top-0");
+    expect(markup).toContain('data-bs-toggle="popover"');
   });
 
   it("renders the empty timeline state and hides quick actions for completed tasks", () => {

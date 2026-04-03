@@ -48,7 +48,7 @@ export function TodoNavbar({
                 </li>
               ))}
             </ul>
-            {search ? <div className="todo-navbar-search">{search}</div> : null}
+            {search ?? null}
           </div>
           <div className="ms-sm-2">
             <UserMenuDropdown

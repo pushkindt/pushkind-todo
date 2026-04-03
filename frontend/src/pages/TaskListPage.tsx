@@ -36,6 +36,11 @@ type PageNotice = {
   message: string;
 };
 
+type TaskListSearchFormProps = {
+  searchValue?: string;
+  onSubmit: (search: string | undefined) => void;
+};
+
 type TaskListScreenProps = {
   shell: ShellData;
   fetchedMenuItems: UserMenuItem[];
@@ -46,6 +51,7 @@ type TaskListScreenProps = {
   addTaskOpen: boolean;
   prefillAssignee?: TaskAssigneePrefill;
   onDismissNotice: () => void;
+  onSearchSubmit: (search: string | undefined) => void;
   onOpenFilters: () => void;
   onCloseFilters: () => void;
   onApplyFilters: (filters: TaskCollectionFilters) => void;
@@ -54,6 +60,11 @@ type TaskListScreenProps = {
   onMutationSuccess: (message: string) => void;
   onSelectPage: (page: number) => void;
 };
+
+function emptyIfBlank(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
 
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
@@ -68,6 +79,48 @@ function formatUpdatedAt(value: string) {
   const minutes = `${date.getMinutes()}`.padStart(2, "0");
 
   return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function TaskListSearchForm({
+  searchValue,
+  onSubmit,
+}: TaskListSearchFormProps) {
+  const [draft, setDraft] = useState(searchValue ?? "");
+
+  useEffect(() => {
+    setDraft(searchValue ?? "");
+  }, [searchValue]);
+
+  return (
+    <form
+      className="d-flex w-100"
+      role="search"
+      action="/"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(emptyIfBlank(draft));
+      }}
+    >
+      <div className="input-group me-2">
+        <input
+          name="search"
+          type="search"
+          className="form-control"
+          aria-label="Search"
+          placeholder="Поиск"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button
+          type="submit"
+          className="btn btn-outline-secondary"
+          aria-label="Найти"
+        >
+          <i className="bi bi-search" />
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function TaskListItemRow({
@@ -137,6 +190,7 @@ export function TaskListScreen({
   addTaskOpen,
   prefillAssignee,
   onDismissNotice,
+  onSearchSubmit,
   onOpenFilters,
   onCloseFilters,
   onApplyFilters,
@@ -157,6 +211,12 @@ export function TaskListScreen({
       homeUrl={shell.homeUrl}
       localMenuItems={shell.localMenuItems}
       fetchedMenuItems={fetchedMenuItems}
+      search={
+        <TaskListSearchForm
+          searchValue={collection.activeFilters.search}
+          onSubmit={onSearchSubmit}
+        />
+      }
     >
       <main className="todo-shell-content">
         <div className="container bg-white border rounded my-2 task-list-page-shell">
@@ -420,6 +480,15 @@ export function TaskListPage() {
       addTaskOpen={addTaskOpen}
       prefillAssignee={prefillAssignee}
       onDismissNotice={() => setPageNotice(undefined)}
+      onSearchSubmit={(search) => {
+        navigateToSearch(
+          buildTaskListSearch({
+            ...collection.activeFilters,
+            search,
+            page: undefined,
+          }),
+        );
+      }}
       onOpenFilters={() => setFiltersOpen(true)}
       onCloseFilters={() => setFiltersOpen(false)}
       onApplyFilters={(filters) => {
