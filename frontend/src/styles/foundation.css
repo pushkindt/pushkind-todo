@@ -21,3 +21,48 @@ body {
 .todo-shell-content {
   min-height: calc(100vh - 5rem);
 }
+
+.add-task-container {
+  display: flex;
+  align-items: center;
+  text-align: center;
+}
+
+.add-task-container > button:hover {
+  opacity: 0.5;
+}
+
+.add-task-container > button {
+  opacity: 1;
+}
+
+.add-task-container > button:active {
+  opacity: 1;
+}
+
+.add-task-container::before,
+.add-task-container::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #000;
+  margin: 0 10px;
+}
+
+.task-recent {
+  background-color: rgba(255, 243, 205, 0.6);
+}
+
+.content-truncate {
+  height: 75px;
+  overflow: hidden;
+  position: relative;
+}
+
+.add-task-preview {
+  min-height: 240px;
+}
+
+.task-list-page-shell {
+  padding-top: 0.5rem;
+  padding-bottom: 0.75rem;
+}

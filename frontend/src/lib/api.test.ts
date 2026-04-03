@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ApiMutationFailure,
+  createTask,
   fetchClients,
   fetchTaskCollection,
   fetchTaskDetails,
@@ -8,6 +10,7 @@ import {
   fetchUsers,
   parseApiMutationError,
   parseApiMutationSuccess,
+  uploadTasks,
 } from "./api";
 
 function jsonResponse(payload: unknown, init?: ResponseInit) {
@@ -205,6 +208,64 @@ describe("api", () => {
     expect(error.fieldErrors).toEqual([
       { field: "title", message: "Required" },
     ]);
+  });
+
+  it("createTask submits urlencoded data and parses success envelopes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        message: "Задача добавлена.",
+        redirect_to: null,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await createTask(
+      new URLSearchParams({
+        title: "Prepare report",
+        priority: "High",
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/tasks",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+      }),
+    );
+    expect(response.message).toBe("Задача добавлена.");
+  });
+
+  it("uploadTasks parses structured mutation failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            message: "Ошибка валидации формы.",
+            field_errors: [
+              { field: "csv", message: "Не удалось обработать CSV-файл." },
+            ],
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    const form = new FormData();
+    form.set("csv", new File(["bad"], "tasks.csv", { type: "text/csv" }));
+
+    const error = await uploadTasks(form).catch((caughtError) => caughtError);
+
+    expect(error).toBeInstanceOf(ApiMutationFailure);
+    expect(error).toMatchObject({
+      status: 400,
+      payload: {
+        fieldErrors: [
+          { field: "csv", message: "Не удалось обработать CSV-файл." },
+        ],
+      },
+    });
   });
 
   it("surfaces unauthorized responses with a localized error", async () => {

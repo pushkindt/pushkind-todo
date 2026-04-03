@@ -31,8 +31,8 @@ use crate::models::config::{ServerConfig, ZmqSenders};
 use crate::repository::DieselRepository;
 #[cfg(feature = "server")]
 use crate::routes::api::{
-    api_v1_clients, api_v1_iam, api_v1_no_access, api_v1_task, api_v1_tasks, api_v1_tracks,
-    api_v1_users,
+    api_v1_clients, api_v1_create_task, api_v1_iam, api_v1_no_access, api_v1_task, api_v1_tasks,
+    api_v1_tracks, api_v1_upload_tasks, api_v1_users,
 };
 #[cfg(feature = "server")]
 use crate::routes::aux::not_assigned;
@@ -127,6 +127,8 @@ pub async fn run(server_config: ServerConfig) -> std::io::Result<()> {
                     .service(api_v1_iam)
                     .service(api_v1_no_access)
                     .service(api_v1_tasks)
+                    .service(api_v1_create_task)
+                    .service(api_v1_upload_tasks)
                     .service(api_v1_task)
                     .service(api_v1_users)
                     .service(api_v1_clients)

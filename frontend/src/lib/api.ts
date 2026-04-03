@@ -419,6 +419,18 @@ export function parseApiMutationError(payload: unknown): ApiMutationError {
   };
 }
 
+export class ApiMutationFailure extends Error {
+  status: number;
+  payload: ApiMutationError;
+
+  constructor(status: number, payload: ApiMutationError) {
+    super(payload.message);
+    this.name = "ApiMutationFailure";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 function withBaseUrl(baseUrl: string, path: string) {
   return new URL(path, baseUrl).toString();
 }
@@ -485,6 +497,35 @@ async function fetchJson(url: string) {
   return readJsonResponse(response, url);
 }
 
+async function submitMutation(url: string, body: BodyInit) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+    },
+    credentials: "include",
+    body,
+  });
+
+  ensureResponseIsNotAuthRedirect(response);
+
+  if (response.ok) {
+    const payload = await readJsonResponse(response, url);
+    return parseApiMutationSuccess(payload);
+  }
+
+  if (isJsonResponse(response)) {
+    const payload = parseApiMutationError(await response.json());
+    throw new ApiMutationFailure(response.status, payload);
+  }
+
+  if (response.status === 401) {
+    throw new Error("Недостаточно прав для доступа к ToDo.");
+  }
+
+  throw new Error(`Request failed with status ${response.status}.`);
+}
+
 export async function fetchShellData(): Promise<ShellData> {
   const payload = await fetchJson("/api/v1/iam");
   return parseShellData(payload);
@@ -527,6 +568,16 @@ export async function fetchTracks(query?: string): Promise<TrackLookupItem[]> {
   const params = query ? new URLSearchParams({ query }) : undefined;
   const payload = await fetchJson(withQuery("/api/v1/tracks", params));
   return parseTrackLookupItems(payload);
+}
+
+export async function createTask(
+  form: URLSearchParams,
+): Promise<ApiMutationSuccess> {
+  return submitMutation("/api/v1/tasks", form);
+}
+
+export async function uploadTasks(form: FormData): Promise<ApiMutationSuccess> {
+  return submitMutation("/api/v1/tasks/upload", form);
 }
 
 export async function fetchHubMenuItems(

@@ -1,12 +1,17 @@
 //! JSON API routes used for React-owned shell, page-data, and lookup contracts.
 
-use actix_web::{HttpResponse, Responder, get, web};
+use actix_multipart::form::MultipartForm;
+use actix_web::{HttpResponse, Responder, get, post, web};
 use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::models::config::CommonServerConfig;
 
 use crate::dto::api::{ClientLookupQueryDto, LookupQueryDto};
 use crate::dto::main::IndexQuery;
+use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
+use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
+use crate::routes::{form_error_response, mutation_error_response, mutation_success_response};
+use crate::services::main as main_service;
 use crate::services::{ServiceError, api as api_service};
 
 #[get("/v1/iam")]
@@ -118,6 +123,68 @@ pub async fn api_v1_tracks(
         Err(err) => {
             log::error!("Failed to load tracks lookup: {err}");
             HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[post("/v1/tasks")]
+/// Create a task from the React-owned task list page.
+pub async fn api_v1_create_task(
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    zmq_senders: web::Data<ZmqSenders>,
+    web::Form(form): web::Form<AddTaskForm>,
+) -> impl Responder {
+    let payload = match AddTaskPayload::try_from(form) {
+        Ok(payload) => payload,
+        Err(err) => return form_error_response(&err),
+    };
+
+    let zmq_senders = zmq_senders.get_ref();
+    match main_service::add_task(
+        payload,
+        &user,
+        repo.get_ref(),
+        &zmq_senders.emailer,
+        &zmq_senders.tasks,
+    ) {
+        Ok(_) => mutation_success_response("Задача добавлена.", None),
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to create task from API: {err}");
+            mutation_error_response(&err)
+        }
+    }
+}
+
+#[post("/v1/tasks/upload")]
+/// Upload tasks in CSV format from the React-owned task list page.
+pub async fn api_v1_upload_tasks(
+    user: AuthenticatedUser,
+    repo: web::Data<DieselRepository>,
+    MultipartForm(form): MultipartForm<UploadTasksForm>,
+) -> impl Responder {
+    let payload = match form.try_into_payload() {
+        Ok(payload) => payload,
+        Err(err) => return form_error_response(&err),
+    };
+
+    match main_service::upload_tasks(payload, &user, repo.get_ref()) {
+        Ok(created_count) => {
+            mutation_success_response(format!("Добавлено задач: {created_count}"), None)
+        }
+        Err(err @ ServiceError::Unauthorized)
+        | Err(err @ ServiceError::Form(_))
+        | Err(err @ ServiceError::TypeConstraint(_))
+        | Err(err @ ServiceError::Conflict)
+        | Err(err @ ServiceError::NotFound) => mutation_error_response(&err),
+        Err(err) => {
+            log::error!("Failed to upload tasks from API: {err}");
+            mutation_error_response(&err)
         }
     }
 }

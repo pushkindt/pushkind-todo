@@ -1,52 +1,40 @@
 //! UI routes handling the main index, task creation, and file upload workflows.
-use actix_multipart::form::MultipartForm;
-use actix_web::{HttpResponse, Responder, get, post, web};
-use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages};
-use pushkind_common::domain::auth::AuthenticatedUser;
-use pushkind_common::models::config::CommonServerConfig;
-use pushkind_common::routes::{base_context, redirect, render_template};
-use tera::Tera;
+use std::path::Path;
 
-use crate::dto::main::IndexQuery;
+use actix_multipart::form::MultipartForm;
+use actix_web::{Either, HttpResponse, Responder, get, post, web};
+use actix_web_flash_messages::FlashMessage;
+use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::routes::{ensure_role, redirect};
+
+use crate::SERVICE_ACCESS_ROLE;
 use crate::forms::main::{AddTaskForm, AddTaskPayload, UploadTasksForm};
+use crate::frontend::{FRONTEND_DIST_DIR, FRONTEND_INDEX_DOCUMENT, open_frontend_html};
 use crate::models::config::ZmqSenders;
 use crate::repository::DieselRepository;
 use crate::services::{ServiceError, main as main_service};
 
-/// Display the main index page showing tasks, filters, and flash messages.
+/// Display the React-backed main index page after access checks succeed.
 #[get("/")]
-pub async fn show_index(
-    params: web::Query<IndexQuery>,
-    user: AuthenticatedUser,
-    repo: web::Data<DieselRepository>,
-    flash_messages: IncomingFlashMessages,
-    server_config: web::Data<CommonServerConfig>,
-    tera: web::Data<Tera>,
-) -> impl Responder {
-    match main_service::load_index_page(params.into_inner(), &user, repo.get_ref()) {
-        Ok(data) => {
-            let mut context = base_context(
-                &flash_messages,
-                &user,
-                "index",
-                &server_config.auth_service_url,
-            );
-            context.insert("tasks", &data.tasks);
-            context.insert("templates", &data.tasks); // temporary alias while templates migrate
-            context.insert("filters", &data.filters);
-            context.insert("users", &data.users);
-            context.insert("clients", &data.clients);
-            context.insert("recently_updated_task_ids", &data.recently_updated_task_ids);
-            context.insert("tracks", &data.tracks);
-            render_template(&tera, "main/index.html", &context)
-        }
+pub async fn show_index(user: AuthenticatedUser) -> impl Responder {
+    match ensure_role(&user, SERVICE_ACCESS_ROLE) {
+        Ok(_) => {}
         Err(ServiceError::Unauthorized) => {
             FlashMessage::error("Недостаточно прав.").send();
-            redirect("/na")
+            return Either::Right(redirect("/na"));
         }
         Err(err) => {
-            log::error!("Failed to list tasks: {err}");
-            HttpResponse::InternalServerError().finish()
+            log::error!("Failed to authorize list page access: {err}");
+            return Either::Right(HttpResponse::InternalServerError().finish());
+        }
+    }
+
+    let index_document = Path::new(FRONTEND_DIST_DIR).join(FRONTEND_INDEX_DOCUMENT);
+    match open_frontend_html(&index_document).await {
+        Ok(document) => Either::Left(document),
+        Err(err) => {
+            log::error!("Failed to open built index document: {err}");
+            Either::Right(HttpResponse::InternalServerError().finish())
         }
     }
 }
