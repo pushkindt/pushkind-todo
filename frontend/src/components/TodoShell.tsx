@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { TodoNavbar } from "./TodoNavbar";
@@ -41,22 +41,23 @@ export function TodoShell({
   search,
   children,
 }: TodoShellProps) {
-  const ajaxFlashContentRef = useRef<HTMLDivElement | null>(null);
+  const flashTimeoutRef = useRef<number | null>(null);
+  const [flashMessage, setFlashMessage] = useState<{
+    category: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     window.showFlashMessage = (message, category = "primary") => {
-      const flashes = ajaxFlashContentRef.current;
-      const modal = window.bootstrap?.Modal.getOrCreateInstance(
-        "#ajax-flash-modal",
-        {},
-      );
-
-      if (!flashes || !modal) {
-        return;
+      if (flashTimeoutRef.current != null) {
+        window.clearTimeout(flashTimeoutRef.current);
       }
 
-      flashes.innerHTML = `<div class="alert alert-${category} alert-dismissible mb-0" role="alert">${message}<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>`;
-      modal.show();
+      setFlashMessage({ message, category });
+      flashTimeoutRef.current = window.setTimeout(() => {
+        setFlashMessage(null);
+        flashTimeoutRef.current = null;
+      }, 4000);
     };
 
     const Bootstrap = window.bootstrap;
@@ -70,23 +71,41 @@ export function TodoShell({
 
     return () => {
       delete window.showFlashMessage;
+      if (flashTimeoutRef.current != null) {
+        window.clearTimeout(flashTimeoutRef.current);
+      }
       popovers.forEach((popover) => popover?.dispose?.());
     };
   }, []);
 
   return (
     <>
-      <div className="modal" tabIndex={-1} id="ajax-flash-modal">
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <div
-              className="modal-body"
-              id="ajax-flash-content"
-              style={{ padding: 0 }}
-              ref={ajaxFlashContentRef}
+      <div
+        id="flashMessages"
+        className="todo-flash-stack position-fixed top-0 start-50 translate-middle-x p-3"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {flashMessage ? (
+          <div
+            className={`alert alert-${flashMessage.category} alert-dismissible mb-0`}
+            role="alert"
+          >
+            {flashMessage.message}
+            <button
+              type="button"
+              className="btn-close"
+              aria-label="Close"
+              onClick={() => {
+                if (flashTimeoutRef.current != null) {
+                  window.clearTimeout(flashTimeoutRef.current);
+                  flashTimeoutRef.current = null;
+                }
+                setFlashMessage(null);
+              }}
             />
           </div>
-        </div>
+        ) : null}
       </div>
       <TodoNavbar
         navigation={navigation}

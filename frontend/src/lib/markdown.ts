@@ -1,17 +1,4 @@
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-type MarkedWindow = Window & {
-  marked?: {
-    parse?: (value: string) => string;
-  };
-};
+import { marked } from "marked";
 
 export function renderMarkdownToHtml(source: string) {
   const trimmedSource = source.trim();
@@ -19,15 +6,6 @@ export function renderMarkdownToHtml(source: string) {
     return "";
   }
 
-  if (typeof window === "undefined") {
-    return escapeHtml(source).replaceAll("\n", "<br>");
-  }
-
-  const markedWindow = window as MarkedWindow;
-  const parse = markedWindow.marked?.parse;
-  if (typeof parse === "function") {
-    return parse(source);
-  }
-
-  return escapeHtml(source).replaceAll("\n", "<br>");
+  const rendered = marked.parse(source, { async: false });
+  return typeof rendered === "string" ? rendered : source;
 }
