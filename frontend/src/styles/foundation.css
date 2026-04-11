@@ -44,6 +44,16 @@ body {
   min-height: calc(100vh - 5rem);
 }
 
+.todo-flash-stack {
+  z-index: 1080;
+  width: min(100%, 36rem);
+  pointer-events: none;
+}
+
+.todo-flash-stack .alert {
+  pointer-events: auto;
+}
+
 .add-task-container {
   display: flex;
   align-items: center;
