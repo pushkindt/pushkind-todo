@@ -48,6 +48,7 @@ describe("TaskListScreen", () => {
             clients: [],
             tracks: [{ value: "Support" }],
           },
+          filesServiceUrl: "https://files.example.com",
         }}
         isRefreshing={false}
         filtersOpen={false}
@@ -91,6 +92,7 @@ describe("TaskListScreen", () => {
             clients: [],
             tracks: [],
           },
+          filesServiceUrl: "https://files.example.com",
         }}
         isRefreshing={false}
         filtersOpen={false}

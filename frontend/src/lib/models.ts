@@ -1,31 +1,24 @@
-export type NavigationItem = {
-  name: string;
-  url: string;
-};
+import type {
+  FrontendNoAccessData,
+  FrontendShellCurrentUser,
+  FrontendShellData,
+  FrontendShellNavigationItem,
+  FrontendShellUserMenuItem,
+} from "@pushkind/frontend-shell/types";
+import type {
+  ApiFieldError as SharedApiFieldError,
+  ApiMutationError as SharedApiMutationError,
+  ApiMutationSuccess as SharedApiMutationSuccess,
+} from "@pushkind/frontend-shell/mutations";
 
-export type UserMenuItem = {
-  name: string;
-  url: string;
-  iconClass?: string;
-};
-
-export type CurrentUser = {
-  email: string;
-  name: string;
-  hubId: number;
-  roles: string[];
-};
-
-export type ShellData = {
-  currentUser: CurrentUser;
-  homeUrl: string;
-  navigation: NavigationItem[];
-  localMenuItems: UserMenuItem[];
-};
-
-export type NoAccessData = {
-  currentUser: CurrentUser;
-  homeUrl: string;
+export type NavigationItem = FrontendShellNavigationItem;
+export type UserMenuItem = FrontendShellUserMenuItem;
+export type CurrentUser = FrontendShellCurrentUser;
+export type ShellData = FrontendShellData;
+export type NoAccessData = Omit<
+  FrontendNoAccessData<CurrentUser>,
+  "requiredRole"
+> & {
   requiredRole: string;
 };
 
@@ -103,6 +96,7 @@ export type TaskCollectionData = {
   activeFilters: TaskCollectionFilters;
   recentlyUpdatedTaskIds: number[];
   lookups: TaskCollectionLookups;
+  filesServiceUrl: string;
 };
 
 export type TaskDetailsTask = {
@@ -136,19 +130,9 @@ export type TaskDetailsData = {
   assignee?: TaskUserSummary;
   client?: TaskClientSummary;
   events: TaskEventItem[];
+  filesServiceUrl: string;
 };
 
-export type ApiFieldError = {
-  field: string;
-  message: string;
-};
-
-export type ApiMutationSuccess = {
-  message: string;
-  redirectTo?: string;
-};
-
-export type ApiMutationError = {
-  message: string;
-  fieldErrors: ApiFieldError[];
-};
+export type ApiFieldError = SharedApiFieldError;
+export type ApiMutationSuccess = SharedApiMutationSuccess;
+export type ApiMutationError = SharedApiMutationError;

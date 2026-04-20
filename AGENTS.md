@@ -6,10 +6,10 @@ architecture and conventions.
 
 ## Project Context
 
-`pushkind-todo` is a Rust 2024 Actix Web application that uses Diesel with
-SQLite, Tera templates, and the shared `pushkind-common` crate. The codebase is
+`pushkind-todo` is a Rust 2024 Actix Web application that uses Diesel with
+SQLite, React-frontend, and the shared `pushkind-common` crate. The codebase is
 layered into domain models, repository traits and implementations, service
-modules, Actix routes, forms, and templates. Business logic belongs in the
+modules, Actix routes, and forms. Business logic belongs in the
 service layer; handlers and repositories should stay thin and focused on I/O
 concerns.
 
@@ -81,14 +81,14 @@ cargo fmt --all -- --check
 - Check related records (e.g., users) before inserts or updates and convert
   missing dependencies into `RepositoryError::NotFound` instead of panicking.
 
-## HTTP and Template Guidelines
+## HTTP and Frontend Guidelines
 
 - Keep Actix handlers in `src/routes` focused on extracting inputs, invoking a
   service, and returning an HTTP response.
 - Manage flash messages and redirects in the HTTP layer; services should not
   return HTTP-specific helper structs.
-- Render templates with Tera contexts that only expose sanitized data. Use the
-  existing component templates under `templates/` for shared UI.
+- Return DTOs to the React-frontend that only expose sanitized data. Use the
+  shared component library in the frontend for a consistent UI.
 - Respect the authorization checks via `pushkind_common::routes::ensure_role` and
   the `SERVICE_ACCESS_ROLE` constant.
 

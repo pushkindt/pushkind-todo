@@ -1,6 +1,5 @@
 //! DTOs exposed by React-owned ToDo API endpoints.
 
-use pushkind_common::domain::auth::AuthenticatedUser;
 use pushkind_common::routes::empty_string_as_none_fromstr;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,93 +13,6 @@ use crate::domain::{
 };
 use crate::dto::main::{IndexPageFilters, IndexTask};
 use crate::dto::task::TaskEventWithAuthor;
-use crate::forms::FormError;
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CurrentUserDto {
-    pub email: String,
-    pub name: String,
-    pub hub_id: i32,
-    pub roles: Vec<String>,
-}
-
-impl From<&AuthenticatedUser> for CurrentUserDto {
-    fn from(user: &AuthenticatedUser) -> Self {
-        Self {
-            email: user.email.clone(),
-            name: user.name.clone(),
-            hub_id: user.hub_id,
-            roles: user.roles.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NavigationItemDto {
-    pub name: String,
-    pub url: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IamDto {
-    pub current_user: CurrentUserDto,
-    pub home_url: String,
-    pub navigation: Vec<NavigationItemDto>,
-    pub local_menu_items: Vec<NavigationItemDto>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NoAccessPageDto {
-    pub current_user: CurrentUserDto,
-    pub home_url: String,
-    pub required_role: &'static str,
-}
-
-/// Field-level validation error returned by JSON mutation endpoints.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApiFieldErrorDto {
-    pub field: String,
-    pub message: String,
-}
-
-/// Successful JSON mutation response.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApiMutationSuccessDto {
-    pub message: String,
-    pub redirect_to: Option<String>,
-}
-
-/// Failed JSON mutation response with optional field-level errors.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApiMutationErrorDto {
-    pub message: String,
-    pub field_errors: Vec<ApiFieldErrorDto>,
-}
-
-impl Default for ApiMutationErrorDto {
-    fn default() -> Self {
-        Self {
-            message: "Ошибка валидации формы.".to_string(),
-            field_errors: Vec::new(),
-        }
-    }
-}
-
-impl From<&FormError> for ApiMutationErrorDto {
-    fn from(error: &FormError) -> Self {
-        Self {
-            message: "Ошибка валидации формы.".to_string(),
-            field_errors: error
-                .field_errors()
-                .into_iter()
-                .map(|error| ApiFieldErrorDto {
-                    field: error.field.to_string(),
-                    message: error.message.into_owned(),
-                })
-                .collect(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskUserSummaryDto {
@@ -296,6 +208,7 @@ pub struct TaskCollectionDto {
     pub active_filters: TaskCollectionFiltersDto,
     pub recently_updated_task_ids: Vec<i32>,
     pub lookups: TaskCollectionLookupsDto,
+    pub files_service_url: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -365,6 +278,7 @@ pub struct TaskDetailsDto {
     pub assignee: Option<TaskUserSummaryDto>,
     pub client: Option<TaskClientSummaryDto>,
     pub events: Vec<TaskEventItemDto>,
+    pub files_service_url: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -479,39 +393,6 @@ mod tests {
     }
 
     #[test]
-    fn current_user_dto_can_be_built_from_authenticated_user() {
-        let user = AuthenticatedUser {
-            sub: "user-1".into(),
-            email: "user@example.com".into(),
-            hub_id: 42,
-            name: "User".into(),
-            roles: vec!["todo".into()],
-            exp: 0,
-        };
-
-        let dto = CurrentUserDto::from(&user);
-
-        assert_eq!(dto.email, "user@example.com");
-        assert_eq!(dto.name, "User");
-        assert_eq!(dto.hub_id, 42);
-        assert_eq!(dto.roles, vec!["todo".to_string()]);
-    }
-
-    #[test]
-    fn api_mutation_error_uses_form_field_errors() {
-        let dto = ApiMutationErrorDto::from(&FormError::InvalidPriority);
-
-        assert_eq!(dto.message, "Ошибка валидации формы.");
-        assert_eq!(
-            dto.field_errors,
-            vec![ApiFieldErrorDto {
-                field: "priority".to_string(),
-                message: "Выберите приоритет задачи.".to_string(),
-            }]
-        );
-    }
-
-    #[test]
     fn task_list_item_conversion_preserves_nested_entities() {
         let assignee = sample_user(9, "Исполнитель", "worker@example.com");
         let client = sample_client();
@@ -555,10 +436,12 @@ mod tests {
             assignee: None,
             client: Some(TaskClientSummaryDto::from(&sample_client())),
             events: vec![TaskEventItemDto::from(&event)],
+            files_service_url: "https://files.example.com".to_string(),
         };
 
         assert_eq!(dto.task.title, "Подготовить отчёт");
         assert_eq!(dto.author.email, "author@example.com");
+        assert_eq!(dto.files_service_url, "https://files.example.com");
         assert_eq!(dto.events[0].event_type, "Comment");
         assert_eq!(
             dto.events[0].event_data,

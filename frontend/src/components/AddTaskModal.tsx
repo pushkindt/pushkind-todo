@@ -2,12 +2,16 @@ import { useDeferredValue, useEffect, useState } from "react";
 
 import { TodoModal } from "./TodoModal";
 import {
-  ApiMutationFailure,
   createTask,
   fetchUsers,
+  isApiMutationError,
+  toFieldErrorMap,
   uploadTasks,
 } from "../lib/api";
-import { renderMarkdownToHtml } from "../lib/markdown";
+import {
+  MarkdownComposer,
+  renderMarkdownToHtml,
+} from "@pushkind/frontend-shell/markdown";
 
 type AssigneeOption = {
   name: string;
@@ -17,6 +21,7 @@ type AssigneeOption = {
 type AddTaskModalProps = {
   isOpen: boolean;
   trackSuggestions: string[];
+  filesServiceUrl: string;
   prefillAssignee?: AssigneeOption;
   onClose: () => void;
   onMutationSuccess: (message: string) => void;
@@ -31,14 +36,6 @@ export function unmatchedAssigneeError(
     : undefined;
 }
 
-function toFieldErrorMap(
-  fieldErrors: Array<{ field: string; message: string }>,
-): Record<string, string> {
-  return Object.fromEntries(
-    fieldErrors.map((fieldError) => [fieldError.field, fieldError.message]),
-  );
-}
-
 function formatAssigneeOption(option: AssigneeOption) {
   return `${option.name} (${option.email})`;
 }
@@ -51,6 +48,7 @@ function emptyIfBlank(value: string) {
 export function AddTaskModal({
   isOpen,
   trackSuggestions,
+  filesServiceUrl,
   prefillAssignee,
   onClose,
   onMutationSuccess,
@@ -59,7 +57,6 @@ export function AddTaskModal({
   const [track, setTrack] = useState("");
   const [priority, setPriority] = useState("Middle");
   const [markdown, setMarkdown] = useState("");
-  const [activeTab, setActiveTab] = useState<"editor" | "preview">("editor");
   const [assigneeInput, setAssigneeInput] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState<
     AssigneeOption | undefined
@@ -88,7 +85,6 @@ export function AddTaskModal({
     setTrack("");
     setPriority("Middle");
     setMarkdown("");
-    setActiveTab("editor");
     setTaskFieldErrors({});
     setTaskErrorMessage("");
     setUploadFieldErrors({});
@@ -191,11 +187,9 @@ export function AddTaskModal({
               onMutationSuccess(response.message);
               onClose();
             } catch (error) {
-              if (error instanceof ApiMutationFailure) {
-                setUploadErrorMessage(error.payload.message);
-                setUploadFieldErrors(
-                  toFieldErrorMap(error.payload.fieldErrors),
-                );
+              if (isApiMutationError(error)) {
+                setUploadErrorMessage(error.message);
+                setUploadFieldErrors(toFieldErrorMap(error));
               } else {
                 setUploadErrorMessage(
                   error instanceof Error
@@ -293,9 +287,9 @@ export function AddTaskModal({
             onMutationSuccess(response.message);
             onClose();
           } catch (error) {
-            if (error instanceof ApiMutationFailure) {
-              setTaskErrorMessage(error.payload.message);
-              setTaskFieldErrors(toFieldErrorMap(error.payload.fieldErrors));
+            if (isApiMutationError(error)) {
+              setTaskErrorMessage(error.message);
+              setTaskFieldErrors(toFieldErrorMap(error));
             } else {
               setTaskErrorMessage(
                 error instanceof Error
@@ -396,56 +390,34 @@ export function AddTaskModal({
           </div>
         </div>
         <div className="mb-3">
-          <ul className="nav nav-tabs" role="tablist">
-            <li className="nav-item" role="presentation">
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "editor" ? "active" : ""}`}
-                onClick={() => setActiveTab("editor")}
-              >
-                Маркдаун
-              </button>
-            </li>
-            <li className="nav-item" role="presentation">
-              <button
-                type="button"
-                className={`nav-link ${
-                  activeTab === "preview" ? "active" : ""
-                }`}
-                onClick={() => setActiveTab("preview")}
-              >
-                Превью
-              </button>
-            </li>
-          </ul>
-          <div className="tab-content">
-            {activeTab === "editor" ? (
-              <textarea
-                className={`form-control border-top-0 rounded-top-0 ${
-                  taskFieldErrors.message ? "is-invalid" : ""
-                }`}
-                rows={10}
-                placeholder="Содержание в формате markdown"
-                value={markdown}
-                onChange={(event) => setMarkdown(event.target.value)}
-              />
-            ) : (
-              <div className="border border-top-0 rounded rounded-top-0 p-3 add-task-preview">
-                {markdownHtml ? (
-                  <div dangerouslySetInnerHTML={{ __html: markdownHtml }} />
-                ) : (
-                  <span className="text-muted">
-                    Превью будет показано здесь.
-                  </span>
-                )}
-              </div>
-            )}
-            {taskFieldErrors.message ? (
-              <div className="invalid-feedback d-block">
-                {taskFieldErrors.message}
-              </div>
-            ) : null}
-          </div>
+          <MarkdownComposer
+            value={markdown}
+            onChange={setMarkdown}
+            rows={10}
+            placeholder="Содержание в формате markdown"
+            textareaClassName={
+              taskFieldErrors.message ? "is-invalid" : undefined
+            }
+            previewClassName="add-task-preview"
+            editorLabel="Маркдаун"
+            previewLabel="Превью"
+            fileBrowserLabel="Файлы"
+            emptyPreviewLabel="Превью будет показано здесь."
+            fileBrowser={
+              filesServiceUrl
+                ? {
+                    baseUrl: filesServiceUrl,
+                    helpText:
+                      "Загрузите или найдите файл, скопируйте ссылку и вставьте её в markdown как ссылку или изображение.",
+                  }
+                : undefined
+            }
+          />
+          {taskFieldErrors.message ? (
+            <div className="invalid-feedback d-block">
+              {taskFieldErrors.message}
+            </div>
+          ) : null}
         </div>
         <div className="row mb-3">
           <label htmlFor="user-add-form-id" className="col-md-2 col-form-label">

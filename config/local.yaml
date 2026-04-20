@@ -1,6 +1,7 @@
 server:
-  port: 8080
+  port: 8079
 app:
   domain: test.me
   auth_service_url: http://auth3.test.me:8081
   crm_service_url: "http://app3.test.me:8079"
+  files_service_url: http://app3.test.me:8080

@@ -1,15 +1,18 @@
+import { ShellFatalState } from "@pushkind/frontend-shell/ShellFatalState";
+
 type TodoShellFatalStateProps = {
   message: string;
 };
 
 export function TodoShellFatalState({ message }: TodoShellFatalStateProps) {
   return (
-    <main className="todo-foundation-shell">
-      <section className="todo-foundation-card">
-        <p className="todo-foundation-eyebrow">ToDo</p>
-        <h1>Не удалось открыть React-оболочку ToDo</h1>
-        <p className="mb-0 text-secondary">{message}</p>
-      </section>
-    </main>
+    <ShellFatalState
+      message={message}
+      serviceLabel="ToDo"
+      title="Не удалось открыть React-оболочку ToDo"
+      shellClassName="todo-foundation-shell"
+      cardClassName="todo-foundation-card"
+      eyebrowClassName="todo-foundation-eyebrow"
+    />
   );
 }

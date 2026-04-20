@@ -67,14 +67,15 @@ function renderScreen(
             },
           },
         ],
+        filesServiceUrl: "https://files.example.com",
       }}
+      filesServiceUrl="https://files.example.com"
       isRefreshing={false}
       editOpen={false}
       completeOpen={false}
       deleteOpen={false}
       quickActionSubmitting={false}
       commentMarkdown=""
-      commentTab="editor"
       commentErrorMessage=""
       commentSubmitting={false}
       completeComment=""
@@ -90,7 +91,6 @@ function renderScreen(
       onOpenComplete={() => {}}
       onCloseComplete={() => {}}
       onCommentChange={() => {}}
-      onCommentTabChange={() => {}}
       onSubmitComment={() => {}}
       onCompleteCommentChange={() => {}}
       onSubmitComplete={() => {}}
@@ -111,7 +111,8 @@ describe("TaskDetailsScreen", () => {
     );
     expect(markup).toContain("Принято в работу");
     expect(markup).toContain("История событий");
-    expect(markup).toContain("tab-content mb-1");
+    expect(markup).toContain("shell-markdown-composer");
+    expect(markup).toContain("Файлы");
     expect(markup).toContain("border-top-0 rounded-top-0");
     expect(markup).toContain('data-bs-toggle="popover"');
   });
@@ -151,6 +152,7 @@ describe("TaskDetailsScreen", () => {
           url: "https://crm.example.com/?public_id=client-7",
         },
         events: [],
+        filesServiceUrl: "https://files.example.com",
       },
     });
 

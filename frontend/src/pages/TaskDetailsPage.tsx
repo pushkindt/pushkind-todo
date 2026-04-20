@@ -8,15 +8,20 @@ import { TodoModal } from "../components/TodoModal";
 import { TodoShell } from "../components/TodoShell";
 import { TodoShellFatalState } from "../components/TodoShellFatalState";
 import {
-  ApiMutationFailure,
   ApiResponseFailure,
   browserLocation,
   createTaskComment,
   deleteTask,
+  fetchHubMenuItems,
+  fetchShellData,
   fetchTaskDetails,
+  isApiMutationError,
   updateTaskStatus,
 } from "../lib/api";
-import { renderMarkdownToHtml } from "../lib/markdown";
+import {
+  MarkdownComposer,
+  renderMarkdownToHtml,
+} from "@pushkind/frontend-shell/markdown";
 import type {
   ShellData,
   TaskClientSummary,
@@ -25,7 +30,7 @@ import type {
   UserMenuItem,
 } from "../lib/models";
 import { formatTaskDate, parseTaskIdFromPathname } from "../lib/taskDetails";
-import { useTodoShell } from "../lib/useTodoShell";
+import { useServiceShell } from "@pushkind/frontend-shell/useServiceShell";
 
 type TaskDetailsLoadState =
   | { status: "loading"; previousData?: TaskDetailsData }
@@ -37,13 +42,13 @@ type TaskDetailsScreenProps = {
   shell: ShellData;
   fetchedMenuItems: UserMenuItem[];
   details: TaskDetailsData;
+  filesServiceUrl: string;
   isRefreshing: boolean;
   editOpen: boolean;
   completeOpen: boolean;
   deleteOpen: boolean;
   quickActionSubmitting: boolean;
   commentMarkdown: string;
-  commentTab: "editor" | "preview";
   commentErrorMessage: string;
   commentFieldError?: string;
   commentSubmitting: boolean;
@@ -60,7 +65,6 @@ type TaskDetailsScreenProps = {
   onOpenComplete: () => void;
   onCloseComplete: () => void;
   onCommentChange: (value: string) => void;
-  onCommentTabChange: (tab: "editor" | "preview") => void;
   onSubmitComment: () => void;
   onCompleteCommentChange: (value: string) => void;
   onSubmitComplete: () => void;
@@ -76,8 +80,8 @@ function toFieldErrorMessage(
 }
 
 function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiMutationFailure) {
-    return error.payload.message;
+  if (isApiMutationError(error)) {
+    return error.message;
   }
 
   return error instanceof Error ? error.message : fallback;
@@ -122,13 +126,13 @@ export function TaskDetailsScreen({
   shell,
   fetchedMenuItems,
   details,
+  filesServiceUrl,
   isRefreshing,
   editOpen,
   completeOpen,
   deleteOpen,
   quickActionSubmitting,
   commentMarkdown,
-  commentTab,
   commentErrorMessage,
   commentFieldError,
   commentSubmitting,
@@ -145,14 +149,11 @@ export function TaskDetailsScreen({
   onOpenComplete,
   onCloseComplete,
   onCommentChange,
-  onCommentTabChange,
   onSubmitComment,
   onCompleteCommentChange,
   onSubmitComplete,
   onMutationSuccess,
 }: TaskDetailsScreenProps) {
-  const commentPreview = renderMarkdownToHtml(commentMarkdown);
-
   return (
     <TodoShell
       navigation={shell.navigation}
@@ -285,59 +286,35 @@ export function TaskDetailsScreen({
                   {commentErrorMessage}
                 </div>
               ) : null}
-              <ul className="nav nav-tabs" role="tablist">
-                <li className="nav-item" role="presentation">
-                  <button
-                    className={`nav-link ${commentTab === "editor" ? "active" : ""}`}
-                    type="button"
-                    onClick={() => onCommentTabChange("editor")}
-                  >
-                    Маркдаун
-                  </button>
-                </li>
-                <li className="nav-item" role="presentation">
-                  <button
-                    className={`nav-link ${commentTab === "preview" ? "active" : ""}`}
-                    type="button"
-                    onClick={() => onCommentTabChange("preview")}
-                  >
-                    Превью
-                  </button>
-                </li>
-              </ul>
-              <div className="tab-content mb-1">
-                <div
-                  className={`tab-pane fade ${commentTab === "editor" ? "show active" : ""}`}
-                  role="tabpanel"
-                >
-                  <textarea
-                    className={`form-control border-top-0 rounded-top-0 ${
-                      commentFieldError ? "is-invalid" : ""
-                    }`}
-                    rows={10}
-                    value={commentMarkdown}
-                    onChange={(event) => onCommentChange(event.target.value)}
-                    placeholder="Содержание в формате markdown"
-                  />
-                  {commentFieldError ? (
-                    <div className="invalid-feedback d-block">
-                      {commentFieldError}
-                    </div>
-                  ) : null}
-                </div>
-                <div
-                  className={`tab-pane fade ${commentTab === "preview" ? "show active" : ""}`}
-                  role="tabpanel"
-                >
-                  <div
-                    className="border border-top-0 rounded rounded-top-0 p-2 task-comment-preview"
-                    dangerouslySetInnerHTML={{
-                      __html:
-                        commentPreview ||
-                        "<span class='text-muted'>Нет содержимого.</span>",
-                    }}
-                  />
-                </div>
+              <div className="mb-1">
+                <MarkdownComposer
+                  value={commentMarkdown}
+                  onChange={onCommentChange}
+                  rows={10}
+                  placeholder="Содержание в формате markdown"
+                  textareaClassName={
+                    commentFieldError ? "is-invalid" : undefined
+                  }
+                  previewClassName="task-comment-preview"
+                  editorLabel="Маркдаун"
+                  previewLabel="Превью"
+                  fileBrowserLabel="Файлы"
+                  emptyPreviewLabel="Нет содержимого."
+                  fileBrowser={
+                    filesServiceUrl
+                      ? {
+                          baseUrl: filesServiceUrl,
+                          helpText:
+                            "Загрузите или найдите файл, скопируйте ссылку и вставьте её в markdown как ссылку или изображение.",
+                        }
+                      : undefined
+                  }
+                />
+                {commentFieldError ? (
+                  <div className="invalid-feedback d-block">
+                    {commentFieldError}
+                  </div>
+                ) : null}
               </div>
               <div className="d-flex justify-content-end gap-2">
                 <button
@@ -361,6 +338,7 @@ export function TaskDetailsScreen({
         task={details.task}
         assignee={details.assignee}
         client={details.client}
+        filesServiceUrl={filesServiceUrl}
         onClose={onCloseEdit}
         onRequestDelete={onRequestDelete}
         onMutationSuccess={onMutationSuccess}
@@ -387,13 +365,25 @@ export function TaskDetailsScreen({
           <label htmlFor="completeTaskComment" className="form-label">
             Комментарий
           </label>
-          <textarea
+          <MarkdownComposer
             id="completeTaskComment"
-            className="form-control"
-            rows={3}
             value={completeComment}
-            onChange={(event) => onCompleteCommentChange(event.target.value)}
+            onChange={onCompleteCommentChange}
+            rows={3}
             placeholder="Комментарий сохранится в истории задачи."
+            editorLabel="Маркдаун"
+            previewLabel="Превью"
+            fileBrowserLabel="Файлы"
+            emptyPreviewLabel="Нет содержимого."
+            fileBrowser={
+              filesServiceUrl
+                ? {
+                    baseUrl: filesServiceUrl,
+                    helpText:
+                      "Загрузите или найдите файл, скопируйте ссылку и вставьте её в markdown как ссылку или изображение.",
+                  }
+                : undefined
+            }
           />
         </div>
         <div className="d-flex justify-content-end gap-2">
@@ -453,7 +443,13 @@ export function TaskDetailsScreen({
 }
 
 export function TaskDetailsPage() {
-  const shellState = useTodoShell("Не удалось загрузить оболочку ToDo.");
+  const shellState = useServiceShell<ShellData, UserMenuItem>({
+    errorMessage: "Не удалось загрузить оболочку ToDo.",
+    menuLoadWarning:
+      "Failed to load auth navigation menu. Falling back to local ToDo menu only.",
+    fetchShellData,
+    fetchHubMenuItems,
+  });
   const [taskId, setTaskId] = useState(() =>
     parseTaskIdFromPathname(window.location.pathname),
   );
@@ -466,7 +462,6 @@ export function TaskDetailsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [quickActionSubmitting, setQuickActionSubmitting] = useState(false);
   const [commentMarkdown, setCommentMarkdown] = useState("");
-  const [commentTab, setCommentTab] = useState<"editor" | "preview">("editor");
   const [commentErrorMessage, setCommentErrorMessage] = useState("");
   const [commentFieldError, setCommentFieldError] = useState<
     string | undefined
@@ -596,13 +591,13 @@ export function TaskDetailsPage() {
       shell={shellState.shell}
       fetchedMenuItems={shellState.authMenuItems}
       details={details}
+      filesServiceUrl={details.filesServiceUrl}
       isRefreshing={detailsState.status === "loading"}
       editOpen={editOpen}
       completeOpen={completeOpen}
       deleteOpen={deleteOpen}
       quickActionSubmitting={quickActionSubmitting}
       commentMarkdown={commentMarkdown}
-      commentTab={commentTab}
       commentErrorMessage={commentErrorMessage}
       commentFieldError={commentFieldError}
       commentSubmitting={commentSubmitting}
@@ -622,7 +617,7 @@ export function TaskDetailsPage() {
 
         void deleteTask(details.task.id)
           .then((response) => {
-            browserLocation.assign(response.redirectTo ?? "/");
+            browserLocation.assign(response.redirect_to ?? "/");
           })
           .catch((error) => {
             setDeleteSubmitting(false);
@@ -668,7 +663,6 @@ export function TaskDetailsPage() {
         setCommentErrorMessage("");
         setCommentFieldError(undefined);
       }}
-      onCommentTabChange={setCommentTab}
       onSubmitComment={() => {
         if (!commentMarkdown.trim()) {
           setCommentErrorMessage("Ошибка валидации формы.");
@@ -686,14 +680,13 @@ export function TaskDetailsPage() {
         void createTaskComment(details.task.id, form)
           .then((response) => {
             setCommentMarkdown("");
-            setCommentTab("editor");
             refreshDetails(response.message);
           })
           .catch((error) => {
-            if (error instanceof ApiMutationFailure) {
-              setCommentErrorMessage(error.payload.message);
+            if (isApiMutationError(error)) {
+              setCommentErrorMessage(error.message);
               setCommentFieldError(
-                toFieldErrorMessage(error.payload.fieldErrors, "message"),
+                toFieldErrorMessage(error.field_errors, "message"),
               );
               return;
             }

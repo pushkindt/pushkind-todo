@@ -6,20 +6,28 @@ import { TodoShell } from "./TodoShell";
 
 describe("TodoShell flash messages", () => {
   afterEach(() => {
-    vi.useRealTimers();
+    delete window.bootstrap;
     delete window.showFlashMessage;
     document.body.innerHTML = "";
     document.body.style.overflow = "";
     document.body.className = "";
   });
 
-  it("shows a dismissible alert without locking page scroll", () => {
-    vi.useFakeTimers();
-
+  it("shows flash messages in the shared Bootstrap modal host", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
     const root = createRoot(container);
+    const show = vi.fn();
+
+    window.bootstrap = {
+      Modal: {
+        getOrCreateInstance: vi.fn(() => ({
+          hide: vi.fn(),
+          show,
+        })),
+      },
+    };
 
     act(() => {
       root.render(
@@ -39,17 +47,10 @@ describe("TodoShell flash messages", () => {
       window.showFlashMessage?.("Saved", "primary");
     });
 
-    const alert = document.querySelector(".todo-flash-stack .alert");
+    const alert = document.querySelector("#ajax-flash-content .alert");
     expect(alert?.textContent).toContain("Saved");
-    expect(document.body.style.overflow).toBe("");
-    expect(document.body.classList.contains("modal-open")).toBe(false);
-    expect(document.querySelector(".modal-backdrop")).toBeNull();
-
-    act(() => {
-      vi.advanceTimersByTime(4000);
-    });
-
-    expect(document.querySelector(".todo-flash-stack .alert")).toBeNull();
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("#ajax-flash-modal")).not.toBeNull();
 
     act(() => {
       root.unmount();

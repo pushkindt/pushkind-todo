@@ -1,10 +1,5 @@
 //! Helpers for loading compiled frontend assets and opening built HTML documents.
 
-use std::path::Path;
-
-use actix_files::NamedFile;
-use thiserror::Error;
-
 /// Root directory for built frontend artifacts emitted by Vite.
 pub const FRONTEND_DIST_DIR: &str = "assets/dist";
 
@@ -20,18 +15,7 @@ pub const FRONTEND_TASK_DOCUMENT: &str = "app/task.html";
 /// Built HTML document that will eventually back `GET /na`.
 pub const FRONTEND_NO_ACCESS_DOCUMENT: &str = "app/no-access.html";
 
-/// Errors raised while reading frontedn_assets.
-#[derive(Debug, Error)]
-pub enum FrontendAssetError {
-    #[error("failed to read frontend asset: {0}")]
-    Read(#[from] std::io::Error),
-}
-
-/// Open a Vite-built HTML document for a React-owned route.
-pub async fn open_frontend_html(path: impl AsRef<Path>) -> Result<NamedFile, FrontendAssetError> {
-    let file = NamedFile::open_async(path).await?;
-    Ok(file.use_last_modified(true).prefer_utf8(true))
-}
+pub use pushkind_common::frontend::{FrontendAssetError, open_frontend_html};
 
 #[cfg(test)]
 mod tests {
