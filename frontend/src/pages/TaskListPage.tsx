@@ -7,7 +7,11 @@ import { TaskPriorityBadge } from "../components/TaskPriorityBadge";
 import { TaskStatusBadge } from "../components/TaskStatusBadge";
 import { TodoShell } from "../components/TodoShell";
 import { TodoShellFatalState } from "../components/TodoShellFatalState";
-import { fetchTaskCollection } from "../lib/api";
+import {
+  fetchHubMenuItems,
+  fetchShellData,
+  fetchTaskCollection,
+} from "../lib/api";
 import type {
   ShellData,
   TaskCollectionData,
@@ -24,7 +28,7 @@ import {
   stripTaskTransientParams,
   type TaskAssigneePrefill,
 } from "../lib/taskListQuery";
-import { useTodoShell } from "../lib/useTodoShell";
+import { useServiceShell } from "@pushkind/frontend-shell/useServiceShell";
 
 type CollectionLoadState =
   | { status: "loading"; previousData?: TaskCollectionData }
@@ -291,6 +295,7 @@ export function TaskListScreen({
       <AddTaskModal
         isOpen={addTaskOpen}
         trackSuggestions={collection.lookups.tracks.map((track) => track.value)}
+        filesServiceUrl={collection.filesServiceUrl}
         prefillAssignee={prefillAssignee}
         onClose={onCloseAddTask}
         onMutationSuccess={onMutationSuccess}
@@ -300,7 +305,13 @@ export function TaskListScreen({
 }
 
 export function TaskListPage() {
-  const shellState = useTodoShell("Не удалось загрузить оболочку ToDo.");
+  const shellState = useServiceShell<ShellData, UserMenuItem>({
+    errorMessage: "Не удалось загрузить оболочку ToDo.",
+    menuLoadWarning:
+      "Failed to load auth navigation menu. Falling back to local ToDo menu only.",
+    fetchShellData,
+    fetchHubMenuItems,
+  });
   const [locationSearch, setLocationSearch] = useState(
     () => window.location.search,
   );

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiResponseFailure,
-  ApiMutationFailure,
   createTaskComment,
   createTask,
   deleteTask,
@@ -11,8 +10,8 @@ import {
   fetchTaskDetails,
   fetchTracks,
   fetchUsers,
-  parseApiMutationError,
-  parseApiMutationSuccess,
+  isApiMutationError,
+  toFieldErrorMap,
   updateTask,
   updateTaskStatus,
   uploadTasks,
@@ -78,6 +77,7 @@ describe("api", () => {
           public_id: "task-5",
         },
         recently_updated_task_ids: [5],
+        files_service_url: "https://files.example.com",
         lookups: {
           users: {
             items: [{ id: 9, name: "Worker", email: "worker@example.com" }],
@@ -106,6 +106,7 @@ describe("api", () => {
     expect(response.items[0].client?.publicId).toBe("client-7");
     expect(response.pagination.totalPages).toBe(4);
     expect(response.activeFilters.assigneeId).toBe(9);
+    expect(response.filesServiceUrl).toBe("https://files.example.com");
     expect(response.lookups.tracks[0].value).toBe("Support");
   });
 
@@ -159,6 +160,7 @@ describe("api", () => {
               },
             },
           ],
+          files_service_url: "https://files.example.com",
         }),
       ),
     );
@@ -170,6 +172,7 @@ describe("api", () => {
     expect(response.client?.url).toBe(
       "https://crm.example.com/?public_id=client-7",
     );
+    expect(response.filesServiceUrl).toBe("https://files.example.com");
     expect(response.events[0].eventType).toBe("Comment");
     expect(response.events[0].eventData).toEqual({ text: "Started" });
   });
@@ -201,22 +204,6 @@ describe("api", () => {
     expect(users[0].email).toBe("worker@example.com");
     expect(clients[0].publicId).toBe("client-7");
     expect(tracks[0].value).toBe("Support");
-  });
-
-  it("mutation parsers map snake_case envelopes to frontend models", () => {
-    const success = parseApiMutationSuccess({
-      message: "Saved",
-      redirect_to: "/task/5",
-    });
-    const error = parseApiMutationError({
-      message: "Validation failed",
-      field_errors: [{ field: "title", message: "Required" }],
-    });
-
-    expect(success.redirectTo).toBe("/task/5");
-    expect(error.fieldErrors).toEqual([
-      { field: "title", message: "Required" },
-    ]);
   });
 
   it("createTask submits urlencoded data and parses success envelopes", async () => {
@@ -311,7 +298,7 @@ describe("api", () => {
     expect(updateResponse.message).toBe("Задача обновлена.");
     expect(statusResponse.message).toBe("Статус задачи обновлён.");
     expect(commentResponse.message).toBe("Комментарий добавлен.");
-    expect(deleteResponse.redirectTo).toBe("/");
+    expect(deleteResponse.redirect_to).toBe("/");
   });
 
   it("uploadTasks parses structured mutation failures", async () => {
@@ -335,14 +322,15 @@ describe("api", () => {
 
     const error = await uploadTasks(form).catch((caughtError) => caughtError);
 
-    expect(error).toBeInstanceOf(ApiMutationFailure);
+    expect(isApiMutationError(error)).toBe(true);
     expect(error).toMatchObject({
-      status: 400,
-      payload: {
-        fieldErrors: [
-          { field: "csv", message: "Не удалось обработать CSV-файл." },
-        ],
-      },
+      message: "Ошибка валидации формы.",
+      field_errors: [
+        { field: "csv", message: "Не удалось обработать CSV-файл." },
+      ],
+    });
+    expect(isApiMutationError(error) ? toFieldErrorMap(error) : {}).toEqual({
+      csv: "Не удалось обработать CSV-файл.",
     });
   });
 

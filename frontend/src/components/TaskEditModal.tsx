@@ -2,13 +2,17 @@ import { useDeferredValue, useEffect, useId, useState } from "react";
 
 import { TodoModal } from "./TodoModal";
 import {
-  ApiMutationFailure,
   fetchClients,
   fetchTracks,
   fetchUsers,
+  isApiMutationError,
+  toFieldErrorMap,
   updateTask,
 } from "../lib/api";
-import { renderMarkdownToHtml } from "../lib/markdown";
+import {
+  MarkdownComposer,
+  renderMarkdownToHtml,
+} from "@pushkind/frontend-shell/markdown";
 import type {
   TaskClientSummary,
   TaskDetailsTask,
@@ -32,18 +36,11 @@ type TaskEditModalProps = {
   task: TaskDetailsTask;
   assignee?: TaskUserSummary;
   client?: TaskClientSummary;
+  filesServiceUrl: string;
   onClose: () => void;
   onMutationSuccess: (message: string) => void;
   onRequestDelete: () => void;
 };
-
-function toFieldErrorMap(
-  fieldErrors: Array<{ field: string; message: string }>,
-): FieldErrors {
-  return Object.fromEntries(
-    fieldErrors.map((fieldError) => [fieldError.field, fieldError.message]),
-  );
-}
 
 function formatAssigneeOption(option: AssigneeOption) {
   return `${option.name} (${option.email})`;
@@ -122,13 +119,13 @@ export function TaskEditModal({
   task,
   assignee,
   client,
+  filesServiceUrl,
   onClose,
   onMutationSuccess,
   onRequestDelete,
 }: TaskEditModalProps) {
   const [title, setTitle] = useState(task.title);
   const [markdown, setMarkdown] = useState(task.description ?? "");
-  const [activeTab, setActiveTab] = useState<"editor" | "preview">("editor");
   const [dueDate, setDueDate] = useState(task.dueDate ?? "");
   const [status, setStatus] = useState(task.status);
   const [track, setTrack] = useState(task.track ?? "");
@@ -170,7 +167,6 @@ export function TaskEditModal({
 
     setTitle(task.title);
     setMarkdown(task.description ?? "");
-    setActiveTab("editor");
     setDueDate(task.dueDate ?? "");
     setStatus(task.status);
     setTrack(task.track ?? "");
@@ -392,9 +388,9 @@ export function TaskEditModal({
             onMutationSuccess(response.message);
             onClose();
           } catch (error) {
-            if (error instanceof ApiMutationFailure) {
-              setErrorMessage(error.payload.message);
-              setFieldErrors(toFieldErrorMap(error.payload.fieldErrors));
+            if (isApiMutationError(error)) {
+              setErrorMessage(error.message);
+              setFieldErrors(toFieldErrorMap(error));
             } else {
               setErrorMessage(
                 error instanceof Error
@@ -436,53 +432,32 @@ export function TaskEditModal({
         </div>
 
         <div className="mb-3">
-          <ul className="nav nav-tabs" role="tablist">
-            <li className="nav-item" role="presentation">
-              <button
-                className={`nav-link ${activeTab === "editor" ? "active" : ""}`}
-                type="button"
-                onClick={() => setActiveTab("editor")}
-              >
-                Маркдаун
-              </button>
-            </li>
-            <li className="nav-item" role="presentation">
-              <button
-                className={`nav-link ${activeTab === "preview" ? "active" : ""}`}
-                type="button"
-                onClick={() => setActiveTab("preview")}
-              >
-                Превью
-              </button>
-            </li>
-          </ul>
-          <div className="border border-top-0 rounded-bottom p-3">
-            {activeTab === "editor" ? (
-              <>
-                <textarea
-                  className={`form-control ${fieldErrors.message ? "is-invalid" : ""}`}
-                  rows={10}
-                  value={markdown}
-                  onChange={(event) => setMarkdown(event.target.value)}
-                  placeholder="Содержание в формате markdown"
-                />
-                {fieldErrors.message ? (
-                  <div className="invalid-feedback d-block">
-                    {fieldErrors.message}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div
-                className="add-task-preview"
-                dangerouslySetInnerHTML={{
-                  __html:
-                    markdownHtml ||
-                    "<span class='text-muted'>Нет содержимого.</span>",
-                }}
-              />
-            )}
-          </div>
+          <MarkdownComposer
+            value={markdown}
+            onChange={setMarkdown}
+            rows={10}
+            placeholder="Содержание в формате markdown"
+            textareaClassName={fieldErrors.message ? "is-invalid" : undefined}
+            previewClassName="add-task-preview"
+            editorLabel="Маркдаун"
+            previewLabel="Превью"
+            fileBrowserLabel="Файлы"
+            emptyPreviewLabel="Нет содержимого."
+            fileBrowser={
+              filesServiceUrl
+                ? {
+                    baseUrl: filesServiceUrl,
+                    helpText:
+                      "Загрузите или найдите файл, скопируйте ссылку и вставьте её в markdown как ссылку или изображение.",
+                  }
+                : undefined
+            }
+          />
+          {fieldErrors.message ? (
+            <div className="invalid-feedback d-block">
+              {fieldErrors.message}
+            </div>
+          ) : null}
         </div>
 
         <div className="row mb-3">

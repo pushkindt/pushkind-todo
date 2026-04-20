@@ -8,4 +8,5 @@ app:
   secret: env::APP_SECRET
   auth_service_url: ""
   crm_service_url: ""
+  files_service_url: ""
   zmq_tasks_pub: tcp://127.0.0.1:5563

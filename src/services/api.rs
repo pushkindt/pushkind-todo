@@ -2,16 +2,16 @@
 use std::collections::HashMap;
 
 use pushkind_common::domain::auth::AuthenticatedUser;
+use pushkind_common::dto::shell::{CurrentUserDto, IamDto, NavigationItemDto, NoAccessPageDto};
 use pushkind_common::models::config::CommonServerConfig;
 use pushkind_common::routes::{check_role, ensure_role};
 use pushkind_common::services::errors::ServiceResult;
 
 use crate::SERVICE_ACCESS_ROLE;
 use crate::dto::api::{
-    ClientLookupCollectionDto, ClientLookupItemDto, ClientLookupQueryDto, CurrentUserDto, IamDto,
-    LookupQueryDto, NavigationItemDto, NoAccessPageDto, TaskCollectionDto,
-    TaskCollectionFiltersDto, TaskCollectionLookupsDto, TaskDetailsDto, TaskDetailsTaskDto,
-    TaskEventItemDto, TaskListItemDto, TaskPaginationDto, TaskUserSummaryDto,
+    ClientLookupCollectionDto, ClientLookupItemDto, ClientLookupQueryDto, LookupQueryDto,
+    TaskCollectionDto, TaskCollectionFiltersDto, TaskCollectionLookupsDto, TaskDetailsDto,
+    TaskDetailsTaskDto, TaskEventItemDto, TaskListItemDto, TaskPaginationDto, TaskUserSummaryDto,
     TrackLookupCollectionDto, TrackLookupItemDto, UserLookupCollectionDto, UserLookupItemDto,
 };
 use crate::dto::main::IndexQuery;
@@ -38,10 +38,11 @@ pub fn get_shell_data(
     };
 
     Ok(IamDto {
-        current_user: CurrentUserDto::from(user),
+        current_user: CurrentUserDto::from(user.clone()),
         home_url: common_config.auth_service_url.clone(),
         navigation,
         local_menu_items: Vec::new(),
+        hub_name: "ToDo".to_string(),
     })
 }
 
@@ -51,9 +52,9 @@ pub fn get_no_access_data(
     common_config: &CommonServerConfig,
 ) -> NoAccessPageDto {
     NoAccessPageDto {
-        current_user: CurrentUserDto::from(user),
+        current_user: CurrentUserDto::from(user.clone()),
         home_url: common_config.auth_service_url.clone(),
-        required_role: SERVICE_ACCESS_ROLE,
+        required_role: Some(SERVICE_ACCESS_ROLE.to_string()),
     }
 }
 
@@ -62,6 +63,7 @@ pub fn get_task_collection_data<R>(
     query: IndexQuery,
     user: &AuthenticatedUser,
     repo: &R,
+    files_service_url: &str,
 ) -> ServiceResult<TaskCollectionDto>
 where
     R: TaskReader + UserReader + UserWriter + ClientReader + ?Sized,
@@ -117,6 +119,7 @@ where
                     .collect(),
             },
         },
+        files_service_url: files_service_url.to_string(),
     })
 }
 
@@ -125,6 +128,7 @@ pub fn get_task_details_data<R>(
     task_id: i32,
     user: &AuthenticatedUser,
     repo: &R,
+    files_service_url: &str,
 ) -> ServiceResult<TaskDetailsDto>
 where
     R: TaskReader + TaskEventReader + UserReader + ClientReader + ?Sized,
@@ -140,6 +144,7 @@ where
             .as_ref()
             .map(crate::dto::api::TaskClientSummaryDto::from),
         events: details.events.iter().map(TaskEventItemDto::from).collect(),
+        files_service_url: files_service_url.to_string(),
     })
 }
 
@@ -274,6 +279,7 @@ mod tests {
 
         assert_eq!(response.current_user.email, "user@example.com");
         assert_eq!(response.home_url, "https://auth.example.com");
+        assert_eq!(response.hub_name, "ToDo");
         assert_eq!(response.navigation.len(), 1);
         assert_eq!(response.navigation[0].name, "Задачи");
         assert_eq!(response.navigation[0].url, "/");
@@ -294,6 +300,6 @@ mod tests {
 
         assert_eq!(response.current_user.name, "Tester");
         assert_eq!(response.home_url, "https://auth.example.com");
-        assert_eq!(response.required_role, "todo");
+        assert_eq!(response.required_role.as_deref(), Some("todo"));
     }
 }

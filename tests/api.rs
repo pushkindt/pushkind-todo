@@ -83,9 +83,13 @@ fn task_collection_contract_includes_items_filters_and_lookups() {
     )
     .expect("create completed task");
 
-    let dto =
-        get_task_collection_data(IndexQuery::default(), &authenticated_user(&["todo"]), &repo)
-            .expect("task collection should load");
+    let dto = get_task_collection_data(
+        IndexQuery::default(),
+        &authenticated_user(&["todo"]),
+        &repo,
+        "https://files.example.com",
+    )
+    .expect("task collection should load");
     let payload = serde_json::to_value(dto).expect("serialize collection dto");
 
     assert_eq!(payload["items"].as_array().expect("items array").len(), 1);
@@ -97,6 +101,10 @@ fn task_collection_contract_includes_items_filters_and_lookups() {
         json!("client-7")
     );
     assert_eq!(payload["active_filters"]["status"], serde_json::Value::Null);
+    assert_eq!(
+        payload["files_service_url"],
+        json!("https://files.example.com")
+    );
     assert_eq!(
         payload["lookups"]["users"]["items"][0]["email"],
         json!("author@example.com")
@@ -153,14 +161,23 @@ fn task_details_contract_includes_related_entities_and_events() {
     ))
     .expect("record event");
 
-    let dto = get_task_details_data(task.id.get(), &authenticated_user(&["todo"]), &repo)
-        .expect("task details should load");
+    let dto = get_task_details_data(
+        task.id.get(),
+        &authenticated_user(&["todo"]),
+        &repo,
+        "https://files.example.com",
+    )
+    .expect("task details should load");
     let payload = serde_json::to_value(dto).expect("serialize details dto");
 
     assert_eq!(payload["task"]["id"], json!(task.id.get()));
     assert_eq!(payload["author"]["email"], json!("author@example.com"));
     assert_eq!(payload["assignee"]["name"], json!("Worker"));
     assert_eq!(payload["client"]["public_id"], json!("client-7"));
+    assert_eq!(
+        payload["files_service_url"],
+        json!("https://files.example.com")
+    );
     assert_eq!(payload["events"][0]["event_type"], json!("Comment"));
     assert_eq!(
         payload["events"][0]["event_data"],
@@ -313,7 +330,8 @@ fn task_details_contract_reflects_update_status_and_comment_mutations() {
     )
     .expect("add comment");
 
-    let dto = get_task_details_data(task.id.get(), &user, &repo).expect("task details");
+    let dto = get_task_details_data(task.id.get(), &user, &repo, "https://files.example.com")
+        .expect("task details");
     let payload = serde_json::to_value(dto).expect("serialize details dto");
 
     assert_eq!(payload["task"]["title"], json!("Updated Task"));
@@ -375,6 +393,11 @@ fn deleted_task_disappears_from_task_details_contract() {
             .is_none()
     );
 
-    let result = get_task_details_data(task.id.get(), &authenticated_user(&["todo"]), &repo);
+    let result = get_task_details_data(
+        task.id.get(),
+        &authenticated_user(&["todo"]),
+        &repo,
+        "https://files.example.com",
+    );
     assert!(matches!(result, Err(ServiceError::NotFound)));
 }

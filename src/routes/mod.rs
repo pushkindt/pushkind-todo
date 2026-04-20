@@ -1,8 +1,8 @@
 //! Route module combining HTTP handlers for both the UI and JSON API.
 use actix_web::{HttpResponse, http::StatusCode};
+use pushkind_common::dto::mutation::{ApiMutationErrorDto, ApiMutationSuccessDto};
 use pushkind_common::services::errors::ServiceError;
 
-use crate::dto::api::{ApiMutationErrorDto, ApiMutationSuccessDto};
 use crate::forms::FormError;
 
 pub mod api;

@@ -54,8 +54,14 @@ pub async fn api_v1_tasks(
     params: web::Query<IndexQuery>,
     user: AuthenticatedUser,
     repo: web::Data<DieselRepository>,
+    app_config: web::Data<AppConfig>,
 ) -> impl Responder {
-    match api_service::get_task_collection_data(params.into_inner(), &user, repo.get_ref()) {
+    match api_service::get_task_collection_data(
+        params.into_inner(),
+        &user,
+        repo.get_ref(),
+        &app_config.files_service_url,
+    ) {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(ServiceError::Unauthorized) => HttpResponse::Unauthorized().finish(),
         Err(err) => {
@@ -73,7 +79,12 @@ pub async fn api_v1_task(
     repo: web::Data<DieselRepository>,
     app_config: web::Data<AppConfig>,
 ) -> impl Responder {
-    match api_service::get_task_details_data(task_id.into_inner(), &user, repo.get_ref()) {
+    match api_service::get_task_details_data(
+        task_id.into_inner(),
+        &user,
+        repo.get_ref(),
+        &app_config.files_service_url,
+    ) {
         Ok(mut response) => {
             if let Some(client) = response.client.as_mut() {
                 client.url = Some(format!(

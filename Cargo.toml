@@ -57,7 +57,7 @@ thiserror = "2.0.18"
 pushkind-common = { git = "https://github.com/pushkindt/pushkind-common.git", branch = "main", default-features = false, optional = true }
 validator = { version = "0.20.0", features = ["derive"] }
 ammonia = "4.1.2"
-config = { version = "0.15.19", default-features = false, features = [
+config = { version = "0.15.22", default-features = false, features = [
     "yaml",
 ], optional = true }
 pushkind-emailer = { git = "https://github.com/pushkindt/pushkind-emailer.git", version = "0.1.0", features = [
